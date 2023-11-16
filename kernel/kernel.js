@@ -72,7 +72,7 @@
     // Process
     let processes = [];
     let pids = 0;
-    let c_process;
+    let c_process, c_user;
     class Thread {
         constructor(process, exec, pid) {
             this.exec = exec;
@@ -93,26 +93,25 @@
     class Process {
         constructor(code_object, user) {
             this.descriptor_table = [
-                new FileDescriptor(new Inode(0, "", "", "c", user, 755), "a"), // Stdin
-                new FileDescriptor(new Inode(0, "", "", "c", user, 755), "a") // Stdout
+                new FileDescriptor("", "-", 755, user), // Stdin
+                new FileDescriptor("", "-", 755, user) // Stdout
             ];
             this.descriptors = 2;
 
             this.pid = pids;
             this.user = user;
             this.code = code_object; // Pass in code object, must already be created from 'new' statment beforehand
-            this.threads = [
-                new Thread(this, this.code.main, pids++)
-            ]
-        }
-        run() {
-
+            this.threads = [];
+            this.add_thread(this.code.main);
         }
         exec(code) {
             this.code = code; // Replace process code object with exec
             this.threads = [
                 new Thread(this, this.code.main, this.pid)
             ]
+        }
+        add_thread(exec) {
+            this.threads.push(this, exec, pids++);
         }
         create_descriptor(descriptor) {
             this.descriptor_table.push(descriptor);
@@ -128,14 +127,20 @@
             this.descriptor_table.splice(fd, 1);
         }
     }
+    function getpid() {
+        return c_process.pid;
+    }
     function fork() {
-        let process = new Process(c_process.code);
+        let process = new Process(c_process.code, c_user);
         processes.push(process);
         return process.pid;
     }
     function exec(path) {
         let code = new get_file(path).inode.get_data()();
         c_process.exec(code);
+    }
+    function thread(exec) {
+        c_process.add_thread(exec);
     }
 
     // Init process
@@ -151,20 +156,30 @@
     // Descriptors
     let descriptor_table = [];
     let descriptors = 0;
-    class FileDescriptor{
-        constructor(data, flags, mode, user, reference) {
+    class FileDescriptor{ 
+        constructor(data, flags, mode, user, inode) {
             this.data = data;
             this.flags = flags;
             this.mode = mode;
             this.user = user;
-            this.reference = reference;
+            this.inode = inode;
+            this.buffer = data;
             this.events = [];
+        }
+        write(data) {
+            this.buffer = data;
+        }
+        append(data) {
+            this.buffer =+ data;
+        }
+        flush() {
+            this.inode.write(this.buffer);
         }
     }
     function fopen(path, flags, mode) {
         // Create and return a file descriptor for a file
         if(!mode) throw new Error("No mode specified");
-        let file = get_file(path);
+        let inode = get_file(path).inode;
 
         let descriptor = new FileDescriptor(inode.get_data(), flags, inode.mode);
         return c_process.create_descriptor(descriptor);
@@ -181,11 +196,20 @@
                 descriptor.data = data;
                 break;
             case 'a':
-                descriptor.data =+ data;
+                descriptor.data += data;
                 break;
         }
     }
     function close(fd) {
+        fd.flush();
         c_process.close(fd);
+    }
+
+    // Scheduler
+    let scheduler = function() {
+        for(let i = 0; i < processes.length; i++) {
+            let process = processes[i];
+            process
+        }
     }
 }
