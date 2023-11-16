@@ -155,7 +155,6 @@
 
     // Descriptors
     let descriptor_table = [];
-    let descriptors = 0;
     class FileDescriptor{ 
         constructor(data, flags, mode, user, inode) {
             this.data = data;
@@ -173,13 +172,20 @@
             this.buffer =+ data;
         }
         flush() {
-            this.inode.write(this.buffer);
+            if(this.inode)
+                this.inode.write(this.buffer);
         }
     }
     function fopen(path, flags, mode) {
         // Create and return a file descriptor for a file
         if(!mode) throw new Error("No mode specified");
-        let inode = get_file(path).inode;
+        if(!flags) throw new Error("No flags specified");
+        if(!path) throw new Error("You must specify a path");
+
+        let file = get_file(path);
+        let inode = file.inode;
+        if(file.incomplete)
+            inode = file.filesystem.create_file(inode.index, path, "", "-", c_user, mode)
 
         let descriptor = new FileDescriptor(inode.get_data(), flags, inode.mode);
         return c_process.create_descriptor(descriptor);
