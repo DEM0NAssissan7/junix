@@ -311,7 +311,7 @@
             switch(code) {
                 case 9:
                     this.dead = true;
-                    interrupt();
+                    if(c_process.pid === this.pid) interrupt();
                     break;
             }
             this.code_table
