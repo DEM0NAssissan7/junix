@@ -13,6 +13,12 @@ class Inode {
     get_data() {
         return this.data;
     }
+    mount(index) {
+        this.mountpoint = index;
+    }
+    umount() {
+        this.mountpoint = false;
+    }
     write(data) {
         if(this.type === "-") {
             this.data = data;
@@ -37,11 +43,15 @@ class Inode {
 }
 
 class JFS {
-    constructor () {
+    constructor (options) {
         this.root = new Inode(0, "/", [], "d", 0, 111);
         this.inodes = [this.root];
         this.indexes = 1;
-        this.is_mounted = false;
+        this.mountpoint = false;
+        this.casefold = true;
+        if(options) {
+            this.casefold = options.casefold ?? true;
+        }
     }
     create_file(parent_index, path, data, type, user, mode) {
         let parent_inode = this.get_inode(parent_index);
@@ -55,7 +65,8 @@ class JFS {
         if(!inode) throw new Error("No file exists at index " + index);
         return inode;
     }
-    mount(path) {
-        this.is_mounted = true;
+    mount(index, inode) {
+        this.mountpoint = index;
+        this.parent_inode = inode;
     }
 }

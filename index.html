@@ -4,10 +4,16 @@
         <!-- Libraries -->
         <script src="libraries/mawi.js"></script>
 
+        <!-- Filesystem Initialization -->
+        <script src="kernel/filesystem.js"></script>
 
+        <!-- Build root filesystem -->
+        <script src="fsbuild/fsinit.js"></script>
+        <script src="fsbuild/userland/coreutils.js"></script>
+        <script src="fsbuild/init.js"></script>
         
         <!-- Load Kernel -->
-        <script src="kernel/filesystem.js"></script>
+        <script src="boot.js"></script>
         <script src="kernel/kernel.js"></script>
     </head>
     <body>

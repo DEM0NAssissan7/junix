@@ -5,13 +5,15 @@ function deep_obj(object) {
 
 {
     let time = performance.now();
-    function get_time() {
-        return performance.now() - time;
+    function get_time(accuracy) {
+        let a = accuracy ?? 1;
+        return Math.round((performance.now() - time) * a) / a;
     }
 }
 let map_path_names = function (path) {
     let file_string = "";
     let string_list = [];
+    if(!path) throw new Error("Invalid path");
     for (let i = 0; i < path.length; i++) {
         let char = path[i];
         switch (char) {
@@ -42,9 +44,10 @@ let map_path_names = function (path) {
     return string_list;
 }
 let consolidate_path_names = function(path_names) {
-    let retval = "/";
+    let retval = "";
     for(let name of path_names)
-        retval += name + "/"
+        retval += "/" + name;
+    return retval;
 }
 let get_filename = function(path) {
     let filename = "";
