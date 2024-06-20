@@ -1,3 +1,285 @@
+/* libraries/mawi.js */
+function deep_obj(object) {
+    return JSON.parse(JSON.stringify(object));
+    // return object;
+}
+
+{
+    let time = performance.now();
+    function get_time(accuracy) {
+        let a = accuracy ?? 1;
+        return Math.round((performance.now() - time) * a) / a;
+    }
+}
+let map_path_names = function (path) {
+    let file_string = "";
+    let string_list = [];
+    if(!path) throw new Error("Invalid path");
+    for (let i = 0; i < path.length; i++) {
+        let char = path[i];
+        switch (char) {
+            case "/":
+                if (file_string.length !== 0)
+                    string_list.push(file_string);
+                file_string = "";
+                continue;
+            case ".":
+                if (i === path.length - 1) continue;
+                switch (path[i + 1]) {
+                    case ".":
+                        if (path[i + 2] === "/") {
+                            string_list.splice(string_list.length - 1, 1);
+                            i += 2;
+                        }
+                        break;
+                    case "/":
+                        i++;
+                        continue;
+                }
+                break;
+        }
+        file_string += char;
+    }
+    if (file_string.length !== 0)
+        string_list.push(file_string);
+    return string_list;
+}
+let consolidate_path_names = function(path_names) {
+    let retval = "";
+    for(let name of path_names)
+        retval += "/" + name;
+    return retval;
+}
+let get_filename = function(path) {
+    let filename = "";
+    for (let i = 0; i < path.length; i++) {
+        let char = path[i];
+        if (char === "/") {
+            filename = "";
+            continue;
+        }
+        filename += char;
+    }
+    if(filename.length !== 0) return filename;
+    return path;
+}
+let to_string = function(data) {
+    let type = typeof data;
+    if(type === "function")
+        return data.toString();
+    else return JSON.stringify(data);
+}
+let data_size = function(data) {
+    return (new TextEncoder().encode(to_string(data))).length
+}
+let clear_cookies = function() {
+    const cookies = document.cookie.split(";");
+
+    for (let i = 0; i < cookies.length; i++) {
+        const cookie = cookies[i];
+        const eqPos = cookie.indexOf("=");
+        const name = eqPos > -1 ? cookie.substring(0, eqPos) : cookie;
+        document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT";
+    }
+}
+
+// Encoding and decoding
+let encode = function(uncoded_string, code) {
+    let output_string = "";
+    for(let i = 0; i < uncoded_string.length; i++) {
+        let has_encoding = false;
+        for(let j = 0; j < code.length; j++) {
+            if(uncoded_string[i] === code[j][0]) {
+                output_string += code[j][1];
+                has_encoding = true;
+                break;
+            }
+        }
+        if(!has_encoding) output_string += uncoded_string[i];
+    }
+    return output_string;
+}
+let decode = function(coded_string, code) {
+    let output_string = "";
+    for(let i = 0; i < coded_string.length; i++) {
+        let has_encoding = false;
+        for(let j = 0; j < code.length; j++) {
+            if(coded_string[i] === code[j][1]) {
+                output_string += code[j][0];
+                has_encoding = true;
+                break;
+            }
+        }
+        if(!has_encoding) output_string += coded_string[i];
+    }
+    return output_string;
+}
+/* kernel/filesystem.js */
+class Inode {
+    constructor(index, path, data, type, user, mode) {
+        this.index = index;
+        this.path = path;
+        this.data = data;
+        let filename = get_filename(path);
+        if(filename.length !== 0) this.filename = filename;    
+        this.type = type;
+        this.user = user;
+        this.mode = mode;
+        this.mountpoint = false;
+    }
+    get_data() {
+        return this.data;
+    }
+    mount(index) {
+        this.mountpoint = index;
+    }
+    umount() {
+        this.mountpoint = false;
+    }
+    write(data) {
+        if(this.type === "-") {
+            this.data = data;
+        } else
+            throw new Error("Cannot write data to a non-normal file.");
+    }
+    append(data) {
+        if(this.type === "-") {
+            this.data += data;
+        } else
+            throw new Error("Cannot write data to a non-normal file.");
+    }
+    add_directory_entry(data) {
+        if(this.type !== "d") throw new Error("File must be type 'd' in order to add directory entries")
+        this.data.push(data);
+    }
+    remove_directory_entry(index) {
+        let target_index = this.data.indexOf(index);
+        if(target_index === -1) throw new Error("Directory entry not found (target inode reference: " + index + ")");
+        this.data.splice(target_index, 1);
+    }
+}
+
+class JFS {
+    constructor (options) {
+        this.root = new Inode(0, "/", [], "d", 0, 111);
+        this.inodes = [this.root];
+        this.indexes = 1;
+        this.mountpoint = false;
+        this.casefold = true;
+        if(options) {
+            this.casefold = options.casefold ?? true;
+        }
+    }
+    create_file(parent_index, path, data, type, user, mode) {
+        let parent_inode = this.get_inode(parent_index);
+        let inode = new Inode(this.indexes, path, data, type, user, mode);
+        this.inodes.push(inode);
+        parent_inode.add_directory_entry(this.indexes++);
+        return inode;
+    }
+    get_inode(index) {
+        let inode = this.inodes[index];
+        if(!inode) throw new Error("No file exists at index " + index);
+        return inode;
+    }
+    mount(index, inode) {
+        this.mountpoint = index;
+        this.parent_inode = inode;
+    }
+}
+/* fsbuild.js */
+let initfs_table = [];
+
+let mkfile = function(path, data) {
+    if(!path) throw new Error("Must pass a path.");
+    if(data)
+        initfs_table.push([path, data]);
+    else if(!data)
+        initfs_table.push([path]);
+}
+mkfile('/home');
+mkfile('/bin');
+mkfile('/bin/init',function(){
+let k = 0;
+this.main = () => {
+    k++;
+    this.open("/bin/hello");
+    
+    // Test
+    let fd = fopen("/hello", "w");
+    write(fd, "Hello World!");
+    close(fd);
+    fd = fopen("/hello", "r");
+    console.log(read(fd));
+    close(fd);
+
+    fd = opendir("/bin");
+    console.log(readdir(fd));
+
+    exit();
+}
+this.open = function(path) {
+    exec(path);
+    fork();
+    exec("/bin/init");
+}
+});
+mkfile('/bin/sh',function(){
+
+});
+mkfile('/bin/hello',function(){
+this.main = function() {
+    console.log("Hello World! My PID is " + getpid());
+    exit();
+}
+});
+mkfile('/bin/init.d');
+mkfile('/bin/init.d/mount',function(){
+this.main = function() {
+    // Mount permanent storage
+    mount("/dev/disk1", "/home");
+    exit();
+}
+});
+mkfile('/bin/init.d/disk',function(){
+let disks = 0;
+this.main = function() {
+    try {
+        let fs = new JFS();
+        fs.parse(localStorage.getItem("storage"));
+        devfs.create_file(0, "disk" + disks++, fs, "m", 0, 755);
+        kdebug("On-device storage has been mapped");
+    } catch (e) {
+        let fs = new JFS();
+        localStorage.setItem("storage", fs);
+        devfs.create_file(0, "disk" + disks++, fs, "m", 0, 755);
+        kdebug("On-device storage initialized");
+    }
+    exit();
+}
+});
+mkfile('/bin/init.d/keyboard',function(){
+let key;
+let fd;
+
+this.main = function() {
+    fd = fopen("/dev/keyboard", "w", 777);
+    thread(this.keyupdate);
+}
+this.keyupdate = function() {
+    write(fd, key);
+    sleep(10);
+}
+
+document.addEventListener("keydown", (e) => {
+    key = e.key;
+});
+});
+/* boot.js */
+let kargs = {
+    initfs_table: initfs_table,
+}
+/* kernel/kernel.js */
 /* First order of business: create filesystem architecture & APIs */
 
 {
