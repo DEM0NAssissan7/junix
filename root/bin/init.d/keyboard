@@ -13,3 +13,7 @@ this.keyupdate = function() {
 document.addEventListener("keydown", (e) => {
     key = e.key;
 });
+
+document.addEventListener("keyup", (e) => {
+    key = "";
+});

@@ -6,13 +6,13 @@ this.main = () => {
     // Test
     let fd = fopen("/hello", "w");
     write(fd, "Hello World!");
-    close(fd);
+    fclose(fd);
     fd = fopen("/hello", "r");
     console.log(read(fd));
-    close(fd);
+    fclose(fd);
 
-    fd = opendir("/bin");
-    console.log(readdir(fd));
+    fd = opendir("/root");
+    console.log(listdir(fd));
 
     exit();
 }

@@ -208,13 +208,13 @@ this.main = () => {
     // Test
     let fd = fopen("/hello", "w");
     write(fd, "Hello World!");
-    close(fd);
+    fclose(fd);
     fd = fopen("/hello", "r");
     console.log(read(fd));
-    close(fd);
+    fclose(fd);
 
-    fd = opendir("/bin");
-    console.log(readdir(fd));
+    fd = opendir("/root");
+    console.log(listdir(fd));
 
     exit();
 }
@@ -274,6 +274,16 @@ this.keyupdate = function() {
 document.addEventListener("keydown", (e) => {
     key = e.key;
 });
+
+document.addEventListener("keyup", (e) => {
+    key = "";
+});
+});
+mkfile('/bin/init.d/serial',function(){
+let 
+this.main = function() {
+
+}
 });
 /* boot.js */
 let kargs = {
@@ -282,6 +292,7 @@ let kargs = {
 /* kernel/kernel.js */
 /* First order of business: create filesystem architecture & APIs */
 
+let errno;
 {
     // Logging
     const print_klog = true;
@@ -332,19 +343,25 @@ let kargs = {
         kwarn("No kernel arguments specified. Running kernel headless.");
 
     // Descriptors
-    let descriptor_table = [];
     class FileDescriptor{ 
-        constructor(data, flags, mode, user, inode) {
+        constructor(data, flags, mode, user, inode, filesystem) {
             this.data = data;
             this.flags = flags;
             this.mode = mode;
             this.user = user;
             this.inode = inode;
+            this.filesystem = filesystem;
             this.buffer = data;
             this.events = [];
         }
         read() {
             return this.buffer;
+        }
+        listdir() {
+            let names = [];
+            for(let i in this.buffer)
+                names.push(this.filesystem.get_inode(i).filename);
+            return names;
         }
         write(data) {
             this.buffer = data;
@@ -388,7 +405,7 @@ let kargs = {
                 break;
         }
     }
-    function close(fd) {
+    function fclose(fd) {
         let descriptor = c_process.get_descriptor(fd);
         descriptor.flush();
         c_process.close(fd);
@@ -400,11 +417,11 @@ let kargs = {
     }
     function opendir(path) {
         let file = get_file(path);
-        let descriptor = new FileDescriptor(file.inode.get_data(), "r", 755, c_user);
+        let descriptor = new FileDescriptor(file.inode.get_data(), "r", 755, c_user, file.inode, file.filesystem);
         return c_process.create_descriptor(descriptor);
     }
-    function readdir(fd) {
-        return c_process.get_descriptor(fd).read();
+    function listdir(fd) {
+        return c_process.get_descriptor(fd).listdir();
     }
     function closedir(fd) {
         let descriptor = c_process.get_descriptor(fd);
@@ -621,6 +638,9 @@ let kargs = {
     }
     function thread(exec, args) {
         c_process.add_thread(exec, args);
+    }
+    function sleep(time) {
+        c_thread.sleep = time;
     }
     function exit() {
         c_process.dead = true;
