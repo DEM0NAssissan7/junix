@@ -14,6 +14,7 @@ def add_file(path):
 
 # Add necessary static files
 add_file("libraries/mawi.js")
+add_file("libraries/stdlib.js")
 add_file("kernel/filesystem.js")
 add_file("fsbuild.js")
 
@@ -31,7 +32,13 @@ def builddir(path, ref, level):
             print(prefix + " " + file)
             f=open(pathref, "r")
             w=open(output_file, "a")
-            w.write("mkfile('"+printref+"',function(){\n"+f.read()+"\n});\n")
+            if f.read(1) == "!":
+                if(f.read(1) != "\n"):
+                    f.seek(1)
+                w.write("mkfile('"+printref+"',`"+f.read()+"`);\n")
+            else:
+                f.seek(0)
+                w.write("mkfile('"+printref+"',function(){\n"+f.read()+"\n});\n")
             f.close()
             w.close()
     print()

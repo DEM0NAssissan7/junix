@@ -69,4 +69,10 @@ class JFS {
         this.mountpoint = index;
         this.parent_inode = inode;
     }
+    stringify() {
+        return "";
+    }
+    parse(string) {
+        return "";
+    }
 }

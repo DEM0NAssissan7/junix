@@ -1,3 +1,13 @@
+/* JUNIX Kernel: The heart of the operating system
+
+Main objectives:
+- Be as absolutely minimal as possible - leave everything except the bare essentials to servers
+- Microkernel-like architecture
+- Behave as close as possible to a real UNIX-like OS (e.g. syscall names and behaviors)
+*/
+
+
+
 /* First order of business: create filesystem architecture & APIs */
 
 let errno;
@@ -59,23 +69,31 @@ let errno;
             this.user = user;
             this.inode = inode;
             this.filesystem = filesystem;
+            if(inode)
+                this.filetype = inode.type;
             this.buffer = data;
             this.events = [];
         }
         read() {
+            if(this.inode)
+                this.buffer = this.inode.get_data(); // Update buffer
             return this.buffer;
         }
         listdir() {
+            if(this.filetype !== "d") throw new Error("Cannot execute listdir(): not a directory");
+            console.log(this.buffer)
             let names = [];
-            for(let i in this.buffer)
+            for(let i of this.buffer)
                 names.push(this.filesystem.get_inode(i).filename);
             return names;
         }
         write(data) {
+            if(this.filetype !== "-") throw new Error("Cannot write to a non-normal file");
             this.buffer = data;
+            this.flush();
         }
         append(data) {
-            this.buffer =+ data;
+            this.write(this.buffer + data);
         }
         flush() {
             if(this.inode)
@@ -84,8 +102,8 @@ let errno;
     }
     function fopen(path, flags, mode) {
         // Create and return a file descriptor for a file
-        if(!flags) throw new Error("No flags specified");
         if(!path) throw new Error("You must specify a path");
+        if(!flags) throw new Error("No flags specified");
 
         let file = get_file(path);
         let inode = file.inode;
@@ -94,7 +112,7 @@ let errno;
             inode = file.filesystem.create_file(inode.index, path, "", "-", c_user, mode ?? inode.mode);
         }
 
-        let descriptor = new FileDescriptor(inode.get_data(), flags, inode.mode, c_user, inode);
+        let descriptor = new FileDescriptor(inode.get_data(), flags, inode.mode, c_user, inode, file.filesystem);
         return c_process.create_descriptor(descriptor);
     }
     function read(fd) {
@@ -104,6 +122,7 @@ let errno;
         let descriptor = c_process.get_descriptor(fd);
         switch(descriptor.flags) {
             case 'r':
+                console.log(descriptor.flags)
                 throw new Error("Cannot write to a file descriptor opened as readonly");
             case 'w':
                 descriptor.write(data);
@@ -112,6 +131,9 @@ let errno;
                 descriptor.append(data);
                 break;
         }
+    }
+    function dup(fd) {
+        c_process.duplicate(fd);
     }
     function fclose(fd) {
         let descriptor = c_process.get_descriptor(fd);
@@ -125,6 +147,8 @@ let errno;
     }
     function opendir(path) {
         let file = get_file(path);
+        if(file.incomplete) throw new Error("Directory " + path + " does not exist");
+        if(file.inode.type !== "d") throw new Error("opendir() failed: not a directory [" + path + "]");
         let descriptor = new FileDescriptor(file.inode.get_data(), "r", 755, c_user, file.inode, file.filesystem);
         return c_process.create_descriptor(descriptor);
     }
@@ -146,7 +170,7 @@ let errno;
     }
     function mount(device, path) {
         let file = get_file(device);
-        if(file.incomplete) throw new Error("Device does not exist at " + path)
+        if(file.incomplete) throw new Error("Device does not exist at " + device)
         let fs = file.inode.get_data();
         mount_fs(fs, path);
         kdebug("Device " + full_path(device) + " mounted at " + full_path(path));
@@ -236,12 +260,13 @@ let errno;
             this.process = process;
             this.exec = exec;
             this.pid = pid;
-            this.args = args;
+            this.args = args ?? [];
             this.sleep = 0;
             this.queued = false;
             this.last_exec = get_time(3);
         }
         is_ready(time) {
+            if(this.sleep < 0) return 0;
             if(time >= this.last_exec + this.sleep)
                 return true;
             return false;
@@ -253,9 +278,9 @@ let errno;
     class Process {
         constructor(code_object, user, working_path) {
             this.descriptor_table = [
-                new FileDescriptor("", "-", 755, user), // Stdin
-                new FileDescriptor("", "-", 755, user), // Stdout
-                new FileDescriptor("", "-", 755, user) // Stderr
+                new FileDescriptor("", "a", 755, user), // Stdin
+                new FileDescriptor("", "a", 755, user), // Stdout
+                new FileDescriptor("", "a", 755, user) // Stderr
             ];
             this.descriptors = 3;
 
@@ -295,12 +320,13 @@ let errno;
             process.command = this.command;
             process.parent = this;
             process.child_index = this.children.length - 1;
-            process.descriptor_table = Object
+            process.descriptor_table = this.descriptor_table
             return process;
         }
         is_available() {
             if( this.suspended ||
-                this.dead)
+                this.dead ||
+                this.waiting)
                 return false;
             return true;
         }
@@ -309,16 +335,25 @@ let errno;
         }
         create_descriptor(descriptor) {
             this.descriptor_table.push(descriptor);
-            return this.descriptors++;
+            return this.descriptor_table.length - 1;
         }
         get_descriptor(fd) {
-            let inode = this.descriptor_table[fd];
-            if(!inode) throw new Error("No descriptor at " + fd);
-            return inode;
+            let descriptor = this.descriptor_table[fd];
+            if(!descriptor) throw new Error("No descriptor at " + fd);
+            return descriptor;
         }
         close(fd) {
             if(!this.descriptor_table[fd]) throw new Error("No file descriptor at " + fd);
             this.descriptor_table[fd] = undefined;
+        }
+        duplicate(fd) {
+            for(let i = 0; i <= this.descriptor_table.length; i++) {
+                if(!this.descriptor_table[i]) {
+                    this.descriptor_table[i] = this.get_descriptor(fd);
+                    return i;
+                }
+            }
+            throw new Error("Could not duplicate process: unknown error");
         }
         signal(code) {
             switch(code) {
@@ -376,9 +411,9 @@ let errno;
                         thread.queued = true;
                     }
                 }
-            }
-            if(process.dead) {
+            } else if(process.dead) {
                 processes.splice(i, 1);
+                i--;
                 continue;
             }
         }
@@ -390,15 +425,16 @@ let errno;
             c_user = thread.process.user;
             let time = get_time(3);
             if(time - sched_start_time > max_proc_time) break;
-            
-            thread.last_exec = time;
-            try {
-                thread.run();
-            } catch (e) {
-                if(!is_interrupt(e)) {
-                    console.error(thread.process.cmdline + " (" + thread.process.pid + ") encountered an error (thread: " + thread.pid + ")");
-                    console.error(e);
-                    thread.process.suspended = true;
+            if(c_process.is_available()){
+                thread.last_exec = time;
+                try {
+                    thread.run();
+                } catch (e) {
+                    if(!is_interrupt(e)) {
+                        console.error(thread.process.cmdline + " (" + thread.process.pid + ") encountered an error (thread: " + thread.pid + ")");
+                        console.error(e);
+                        thread.process.suspended = true;
+                    }
                 }
             }
             thread.queued = false;
@@ -453,6 +489,7 @@ let errno;
     } else {
         kwarn("Kernel running headless. Tmpfs being used for root.");
     }
+    window.root_fs = root_fs;
 
     // Init process
     {
@@ -470,5 +507,8 @@ let errno;
     kdebug("Beginning execution loop");
     setInterval(() => {
         scheduler();
+    }, 100);
+    setTimeout(() => {
+        console.log(get_file("/bin"))
     }, 100);
 }

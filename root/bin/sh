@@ -1,0 +1,68 @@
+let command = "";
+let prompt = "#";
+this.main = function(...args) {
+    let child = false;
+    for(let arg of args) {
+        if(arg === "child=true") {
+            child = true;
+            break;
+        }
+    }
+    if(!child) {
+        // Set stdin and stout as /dev/keyboard and /dev/console
+        fclose(0);
+        fclose(1);
+        fclose(2);
+
+        let fd = fopen("/dev/keyboard", "r");
+        dup(fd);
+        fclose(fd);
+        fd = fopen("/dev/console", "w");
+        dup(fd);
+        dup(fd);
+        fclose(fd);
+    }
+    sleep(-1);
+    thread(read_input, []);
+    thread(blink_cursor, []);
+}
+
+function read_input() {
+    let b = read(0);
+    printf(read(0));
+}
+let on = false;
+function blink_cursor() {
+    if(!on)
+        set_cursor_on();
+    else
+        set_cursor_off();
+
+    sleep(2000);
+}
+function set_cursor_off() {
+    if(on) {
+        del();
+        on = false;
+    }
+}
+function set_cursor_on() {
+    if(!on) {
+        printf("█");
+        on = true;
+    }
+}
+
+function write_string(string) {
+    let fd = fopen("/dev/console", "a")
+    write(fd, string);
+    fclose(fd)
+}
+
+function del(count) {
+    let string = "";
+    for(let i = 0; i < count ?? 1; i++) {
+        string += "\b"
+    }
+    write_string("\b");
+}

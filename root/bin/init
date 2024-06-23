@@ -1,23 +1,13 @@
-let k = 0;
+// JUNIX Init system: inspired by FreeBSD rc
 this.main = () => {
-    k++;
-    this.open("/bin/hello");
-    
-    // Test
-    let fd = fopen("/hello", "w");
-    write(fd, "Hello World!");
-    fclose(fd);
-    fd = fopen("/hello", "r");
-    console.log(read(fd));
-    fclose(fd);
-
-    fd = opendir("/root");
-    console.log(listdir(fd));
-
-    exit();
+    let fd = fopen("/etc/rc", "r");
+    let paths = read(fd).split("\n");
+    for(let path of paths)
+        this.open(path);
+    sleep(-1);
 }
 this.open = function(path) {
+    console.log("Initializing " + path)
     exec(path);
     fork();
-    exec("/bin/init");
 }

@@ -1,0 +1,5 @@
+// Make local storage
+
+this.main = function(args) {
+    
+}

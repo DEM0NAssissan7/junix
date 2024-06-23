@@ -1,0 +1,27 @@
+let fd, element;
+let update_display = function() {
+    let string = read(fd);
+    let buff = element.innerText;
+    let char;
+    for(let i = 0; i < string.length; i++) {
+        char = string[i];
+        console.log(char);
+        switch(char) {
+            case "\b":
+                buff = buff.substring(0, buff.length - 1);
+                break;
+            default:
+                buff += char;
+                break;
+        }
+    }
+    element.innerText = buff
+    write(fd, "");
+    sleep(5);
+}
+this.main = function() {
+    element = document.getElementById("console");
+    fd = fopen("/dev/console", "w");
+    sleep(-1);
+    thread(update_display, []);
+}

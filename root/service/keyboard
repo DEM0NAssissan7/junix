@@ -1,19 +1,19 @@
-let key;
 let fd;
+let keys = "";
 
+function keyupdate() {
+    write(fd, keys);
+}
 this.main = function() {
     fd = fopen("/dev/keyboard", "w", 777);
-    thread(this.keyupdate);
-}
-this.keyupdate = function() {
-    write(fd, key);
-    sleep(10);
+    thread(keyupdate, []);
+    sleep(-1);
 }
 
 document.addEventListener("keydown", (e) => {
-    key = e.key;
+    keys+=e.key;
 });
 
 document.addEventListener("keyup", (e) => {
-    key = "";
+    keys = keys.replaceAll(e.key, "");
 });

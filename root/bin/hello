@@ -1,4 +1,0 @@
-this.main = function() {
-    console.log("Hello World! My PID is " + getpid());
-    exit();
-}
