@@ -1,3 +1,13 @@
+// Interrupts
+const interrupt_string = "interrupt"
+let interrupt = function() {
+    throw interrupt_string;
+}
+let is_interrupt = function(string) {
+    if(string === interrupt_string) return true;
+    return false;
+}
+
 function deep_obj(object) {
     return JSON.parse(JSON.stringify(object));
     // return object;
@@ -26,9 +36,12 @@ let map_path_names = function (path) {
                 if (i === path.length - 1) continue;
                 switch (path[i + 1]) {
                     case ".":
-                        if (path[i + 2] === "/") {
-                            string_list.splice(string_list.length - 1, 1);
-                            i += 2;
+                        if(path[i - 1]) {
+                            if (path[i - 1] === "/") {
+                                string_list.splice(string_list.length - 1, 1);
+                                i += 2;
+                                continue
+                            }
                         }
                         break;
                     case "/":
@@ -44,9 +57,12 @@ let map_path_names = function (path) {
     return string_list;
 }
 let consolidate_path_names = function(path_names) {
-    let retval = "";
-    for(let name of path_names)
-        retval += "/" + name;
+    let retval = "/";
+    for(let i = 0; i < path_names.length; i++) {
+        retval += path_names[i];
+        if(i < path_names.length - 1)
+            retval += "/";
+    }
     return retval;
 }
 let get_filename = function(path) {
@@ -112,4 +128,55 @@ let decode = function(coded_string, code) {
         if(!has_encoding) output_string += coded_string[i];
     }
     return output_string;
+}
+function map_variables(string) {
+    let buffer = "";
+    let varname = "";
+    let value = "";
+    let deftable = [];
+    for(let char of string) {
+        switch(char) {
+            case '=':
+                if(varname.length > 0) {
+                    value += buffer;
+                    buffer = "";
+                    break;
+                }
+                varname = buffer;
+                buffer = "";
+                break;
+            case '\n':
+                value += buffer;
+                buffer = "";
+                deftable.push([varname, value]);
+                value = "";
+                varname = "";
+                break;
+            default:
+                buffer += char;
+                break;
+        }
+    }
+    if(buffer.length > 0)
+        deftable.push([varname, buffer]);
+    return deftable;
+}
+function map_env_vars(envp) {
+    let deftable = [];
+    for(let arg of envp) {
+        let _deftable = map_variables(arg);
+        if(_deftable.length < 1) continue;
+        deftable.push(..._deftable);
+    }
+    return deftable;
+}
+function get_variable_value(identifier, deftable) {
+    for(let def of deftable) {
+        if(def[0] === identifier)
+            return def[1];
+    }
+    return NaN;
+}
+function map_options(args) {
+    
 }

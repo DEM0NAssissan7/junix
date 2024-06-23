@@ -1,68 +1,113 @@
-let command = "";
-let prompt = "#";
-this.main = function(...args) {
-    let child = false;
-    for(let arg of args) {
-        if(arg === "child=true") {
-            child = true;
-            break;
+let buffer = "";
+const prompt = "#";
+const cursor_char = "_";
+let paths = [];
+let env;
+let executed = false;
+const version_string = "sh 1.0"
+this.main = function(args, envp) {
+    env = envp;
+
+    paths = get_variable_value("PATH", env).split(":");
+
+    printf(version_string+"\n")
+    reprompt();
+    thread(read_input, []);
+    sleep(-1);
+}
+
+function add_to_buffer(b) {
+    for(let a of b) {
+        switch(a) {
+            case '\b':
+                if(buffer.length - 1 < 0) return false;
+                buffer = buffer.substr(0, buffer.length - 1);
+                break;
+            case '\n':
+                printf("\b\n")
+                if(buffer.length > 0)
+                    execute_command(buffer);
+                else {
+                    reprompt();
+                }
+                return false;
+            default:
+                buffer += a;
+        }
+        return true;
+    }
+}
+function read_input() {
+    if(executed) {
+        buffer = "";
+        reprompt();
+        executed = false;
+    }
+    let b = read(0);
+    if(b.length > 0) {
+        if(add_to_buffer(b))
+            printf('\b' + read(0) + cursor_char);
+    }
+}
+function reprompt() {
+    buffer = "";
+    printf(prompt + " " + cursor_char);
+}
+function find_path(command) {
+    for(let path of paths) {
+        if(listdir(opendir(path)).indexOf(command) !== -1) {
+            return path;
         }
     }
-    if(!child) {
-        // Set stdin and stout as /dev/keyboard and /dev/console
-        fclose(0);
-        fclose(1);
-        fclose(2);
+    return "";
+}
+let internal_commands = [
+    ["exit", (args) => {
+        exit();
+    }],
+    ["clear", () => {
+        printf('\?');
+    }],
+    ["cd", (args) => {
+        chdir(args);
+    }],
+    ["pwd", () => {
+        printf(getcwd() + "\n");
+    }]
+]
+function execute_command() {
+    let command = buffer.split(" ")[0];
+    let separator_index = buffer.indexOf(" ");
+    let args = buffer.substring(separator_index + 1, buffer.length);
+    if(args.length === buffer.length) args = "";
+    console.log(args, separator_index);
+    executed = true;
 
-        let fd = fopen("/dev/keyboard", "r");
-        dup(fd);
-        fclose(fd);
-        fd = fopen("/dev/console", "w");
-        dup(fd);
-        dup(fd);
-        fclose(fd);
+    let callback = internal_commands.find(a => {
+        if (a[0] === command)
+            return true;
+    });
+    if(callback) {
+        try {
+            callback[1](args);
+        } catch (e) {
+            if(!is_interrupt(e))
+                fprintf(stderr, "sh: "+e+"\n")
+        }
+    } else {
+        let cmdline = find_path(command) + "/" + command;
+        if(!access(cmdline)) {
+            fprintf(stderr, "Command "+command+" not found\n");
+            return;
+        }
+        try {
+            fork(() => {
+                exec(cmdline, args, env);
+            });
+            wait();
+        } catch (e) {
+            if(!is_interrupt(e))
+                fprintf(stderr, "sh: " + e + "\n");
+        }
     }
-    sleep(-1);
-    thread(read_input, []);
-    thread(blink_cursor, []);
-}
-
-function read_input() {
-    let b = read(0);
-    printf(read(0));
-}
-let on = false;
-function blink_cursor() {
-    if(!on)
-        set_cursor_on();
-    else
-        set_cursor_off();
-
-    sleep(2000);
-}
-function set_cursor_off() {
-    if(on) {
-        del();
-        on = false;
-    }
-}
-function set_cursor_on() {
-    if(!on) {
-        printf("█");
-        on = true;
-    }
-}
-
-function write_string(string) {
-    let fd = fopen("/dev/console", "a")
-    write(fd, string);
-    fclose(fd)
-}
-
-function del(count) {
-    let string = "";
-    for(let i = 0; i < count ?? 1; i++) {
-        string += "\b"
-    }
-    write_string("\b");
 }

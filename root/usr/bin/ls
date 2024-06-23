@@ -1,0 +1,13 @@
+this.main = function(args) {
+    let fd;
+    if(args.length === 0)
+        fd = opendir(getcwd());
+    else
+        fd = opendir(args);
+    let items = listdir(fd);
+    for(let item of items) {
+        printf(item + "  ");
+    }
+    printf('\n')
+    exit();
+}

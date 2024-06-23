@@ -1,0 +1,6 @@
+this.main = function(args) {
+    let fd = fopen(args, "r");
+    printf(read(fd) + '\n');
+    fclose(fd);
+    exit();
+}

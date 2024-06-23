@@ -1,13 +1,59 @@
 // JUNIX Init system: inspired by FreeBSD rc
+let fd;
+let pid;
 this.main = () => {
-    let fd = fopen("/etc/rc", "r");
+    if(getpid() !== 1) {
+        fprintf(stderr, "init can only run on PID 1\n");
+        exit();
+    }
+
+    fd = fopen("/etc/services", "r");
     let paths = read(fd).split("\n");
     for(let path of paths)
-        this.open(path);
+        start(path);
+    fclose(fd);
+    fclose(stdio);
+    fclose(stdin);
+    fclose(stderr);
+
+    pid = thread(post_driver);
     sleep(-1);
 }
-this.open = function(path) {
-    console.log("Initializing " + path)
-    exec(path);
-    fork();
+let wait = false;
+function post_driver() {
+    if(!wait) {
+        wait = true;
+        return;
+    }
+    // Create stdin, stdio, and stderr
+    fopen("/dev/keyboard", "r"); // Stdin
+    fopen("/dev/console", "a"); // Stdio
+    dup(stdio); // Stderr
+
+    fd = fopen("/etc/os-release", "r")
+    let deftable = map_variables(read(fd));
+    printf(get_variable_value("NAME", deftable) + " " +
+            get_variable_value("MAJOR_VERSION", deftable) +
+            " [" + get_variable_value("MINOR_VERSION", deftable) + "]\n\n");
+    fclose(fd);
+
+    printf("Starting /etc/rc\n");
+    fd = fopen("/etc/rc", "r");
+    paths = read(fd).split("\n");
+    for(let path of paths)
+        start(path);
+    printf("\n\n");
+
+    cancel(pid);
+}
+function start (path) {
+    printf("Starting " + path)
+    console.log("starting " + path)
+    fork(() => {
+        fclose(fd);
+        let _fd = fopen("/etc/login.conf", "r");
+        exec(path, "", map_variables(read(_fd)));
+        fclose(_fd);
+        printf(" [" + getpid() + "]\n");
+    });
 }

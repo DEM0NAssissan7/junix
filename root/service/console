@@ -5,19 +5,22 @@ let update_display = function() {
     let char;
     for(let i = 0; i < string.length; i++) {
         char = string[i];
-        console.log(char);
         switch(char) {
             case "\b":
                 buff = buff.substring(0, buff.length - 1);
+                break;
+            case '\?':
+                buff = "";
                 break;
             default:
                 buff += char;
                 break;
         }
     }
-    element.innerText = buff
+    if(string.length > 0)
+        element.innerText = buff
     write(fd, "");
-    sleep(5);
+    sleep(30);
 }
 this.main = function() {
     element = document.getElementById("console");

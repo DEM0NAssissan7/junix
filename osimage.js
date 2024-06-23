@@ -1,4 +1,14 @@
 /* libraries/mawi.js */
+// Interrupts
+const interrupt_string = "interrupt"
+let interrupt = function() {
+    throw interrupt_string;
+}
+let is_interrupt = function(string) {
+    if(string === interrupt_string) return true;
+    return false;
+}
+
 function deep_obj(object) {
     return JSON.parse(JSON.stringify(object));
     // return object;
@@ -27,9 +37,12 @@ let map_path_names = function (path) {
                 if (i === path.length - 1) continue;
                 switch (path[i + 1]) {
                     case ".":
-                        if (path[i + 2] === "/") {
-                            string_list.splice(string_list.length - 1, 1);
-                            i += 2;
+                        if(path[i - 1]) {
+                            if (path[i - 1] === "/") {
+                                string_list.splice(string_list.length - 1, 1);
+                                i += 2;
+                                continue
+                            }
                         }
                         break;
                     case "/":
@@ -45,9 +58,12 @@ let map_path_names = function (path) {
     return string_list;
 }
 let consolidate_path_names = function(path_names) {
-    let retval = "";
-    for(let name of path_names)
-        retval += "/" + name;
+    let retval = "/";
+    for(let i = 0; i < path_names.length; i++) {
+        retval += path_names[i];
+        if(i < path_names.length - 1)
+            retval += "/";
+    }
     return retval;
 }
 let get_filename = function(path) {
@@ -114,12 +130,64 @@ let decode = function(coded_string, code) {
     }
     return output_string;
 }
+function map_variables(string) {
+    let buffer = "";
+    let varname = "";
+    let value = "";
+    let deftable = [];
+    for(let char of string) {
+        switch(char) {
+            case '=':
+                if(varname.length > 0) {
+                    value += buffer;
+                    buffer = "";
+                    break;
+                }
+                varname = buffer;
+                buffer = "";
+                break;
+            case '\n':
+                value += buffer;
+                buffer = "";
+                deftable.push([varname, value]);
+                value = "";
+                varname = "";
+                break;
+            default:
+                buffer += char;
+                break;
+        }
+    }
+    if(buffer.length > 0)
+        deftable.push([varname, buffer]);
+    return deftable;
+}
+function map_env_vars(envp) {
+    let deftable = [];
+    for(let arg of envp) {
+        let _deftable = map_variables(arg);
+        if(_deftable.length < 1) continue;
+        deftable.push(..._deftable);
+    }
+    return deftable;
+}
+function get_variable_value(identifier, deftable) {
+    for(let def of deftable) {
+        if(def[0] === identifier)
+            return def[1];
+    }
+    return NaN;
+}
 /* libraries/stdlib.js */
-function fprintf(message, fd) {
+const stdin = 0;
+const stdio = 1;
+const stderr = 2;
+function fprintf(fd, message) {
     write(fd, message);
 }
-function printf(message) {
-    fprintf(message, 1);
+function printf(...messages) {
+    for(let message of messages)
+        fprintf(stdio, message);
 }
 function fgetc() {
     let string = read(fd);
@@ -215,9 +283,24 @@ let mkfile = function(path, data) {
     else if(!data)
         initfs_table.push([path]);
 }
+mkfile('/home');
 mkfile('/usr');
-mkfile('/usr/local');
 mkfile('/usr/bin');
+mkfile('/usr/bin/cat',function(){
+this.main = function(args) {
+    let fd = fopen(args, "r");
+    printf(read(fd) + '\n');
+    fclose(fd);
+    exit();
+}
+});
+mkfile('/usr/bin/js',function(){
+this.main = function(args) {
+    let fd = fopen(args, "r");
+    (function(){(read(fd))();})()
+    exit();
+}
+});
 mkfile('/usr/bin/mklclstr',function(){
 // Make local storage
 
@@ -225,18 +308,23 @@ this.main = function(args) {
     
 }
 });
-mkfile('/home');
-mkfile('/var');
-mkfile('/var/modalias',function(){
-
+mkfile('/usr/bin/ls',function(){
+this.main = function(args) {
+    let fd;
+    if(args.length === 0)
+        fd = opendir(getcwd());
+    else
+        fd = opendir(args);
+    let items = listdir(fd);
+    for(let item of items) {
+        printf(item + "  ");
+    }
+    printf('\n')
+    exit();
+}
 });
-mkfile('/etc');
-mkfile('/etc/fstab',`/dev/disk0 /home`);
-mkfile('/etc/rc',`/service/disk
-/service/mount
-/service/keyboard
-/service/console
-/bin/sh`);
+mkfile('/usr/local');
+mkfile('/usr/local/bin');
 mkfile('/boot');
 mkfile('/boot/kernel',function(){
 /* JUNIX Kernel: The heart of the operating system
@@ -289,7 +377,9 @@ let errno;
     }
 
     //Panic
+    let interval;
     let panic = function(message) {
+        clearInterval(interval);
         alert("Panic! -> " + message);
         console.error("Kernel panic (" + get_time() + ")");
         console.error(message);
@@ -315,25 +405,28 @@ let errno;
             this.buffer = data;
             this.events = [];
         }
-        read() {
+        update_buffer() {
             if(this.inode)
-                this.buffer = this.inode.get_data(); // Update buffer
+                this.buffer = this.inode.get_data();
+        }
+        read() {
+            this.update_buffer();
             return this.buffer;
         }
         listdir() {
             if(this.filetype !== "d") throw new Error("Cannot execute listdir(): not a directory");
-            console.log(this.buffer)
             let names = [];
             for(let i of this.buffer)
                 names.push(this.filesystem.get_inode(i).filename);
             return names;
         }
         write(data) {
-            if(this.filetype !== "-") throw new Error("Cannot write to a non-normal file");
+            if(this.filetype !== "-" && this.filetype) throw new Error("Cannot write to a non-normal file");
             this.buffer = data;
             this.flush();
         }
         append(data) {
+            this.update_buffer();
             this.write(this.buffer + data);
         }
         flush() {
@@ -349,6 +442,7 @@ let errno;
         let file = get_file(path);
         let inode = file.inode;
         if(file.incomplete) {
+            if(flags === "r") throw new Error("File " + path + " does not exist");
             kdebug("Creating file at " + path);
             inode = file.filesystem.create_file(inode.index, path, "", "-", c_user, mode ?? inode.mode);
         }
@@ -363,7 +457,6 @@ let errno;
         let descriptor = c_process.get_descriptor(fd);
         switch(descriptor.flags) {
             case 'r':
-                console.log(descriptor.flags)
                 throw new Error("Cannot write to a file descriptor opened as readonly");
             case 'w':
                 descriptor.write(data);
@@ -372,6 +465,9 @@ let errno;
                 descriptor.append(data);
                 break;
         }
+    }
+    function access(path) {
+        return !(get_file(path).incomplete);
     }
     function dup(fd) {
         c_process.duplicate(fd);
@@ -432,19 +528,28 @@ let errno;
     }
 
     // Kernel file tools
-    let working_path = "/";
+    let full_path_dirty = function(path) {
+        if(path.length === 0) throw new Error("Invalid path");
+        let working_path = "";
+        if(path[0] !== "/") {
+            working_path = "/";
+            if(c_process)
+                working_path = c_process.working_path;
+        }
+        return working_path + "/" + path;
+    }
+    let map_full_path_names = function(path) {
+        return map_path_names(full_path_dirty(path))
+    }
     let full_path = function(path) {
-        let input_paths = map_path_names(path);
-        let working_paths = map_path_names(working_path);
-        let paths = working_paths.concat(input_paths);
-        return consolidate_path_names(paths);
+        return consolidate_path_names(map_full_path_names(path));
     }
     let get_file = function(path) {
         if(!path) throw new Error("No path specified");
-        let path_names = map_path_names(full_path(path));
+        let path_names = map_full_path_names(path);
         let filesystem = root_fs;
         let index = 0;
-        let inode;
+        let inode = filesystem.get_inode(index);
         let name_index = 0;
 
         let steps = path_names.length;
@@ -481,16 +586,6 @@ let errno;
             incomplete: steps !== 0
         };
     }
-
-    // Interrupts
-    const interrupt_string = "interrupt"
-    let interrupt = function() {
-        throw interrupt_string;
-    }
-    let is_interrupt = function(string) {
-        if(string === interrupt_string) return true;
-        return false;
-    }
     
     // Process
     let processes = [];
@@ -507,7 +602,7 @@ let errno;
             this.last_exec = get_time(3);
         }
         is_ready(time) {
-            if(this.sleep < 0) return 0;
+            if(this.sleep < 0) return false;
             if(time >= this.last_exec + this.sleep)
                 return true;
             return false;
@@ -519,14 +614,14 @@ let errno;
     class Process {
         constructor(code_object, user, working_path) {
             this.descriptor_table = [
-                new FileDescriptor("", "a", 755, user), // Stdin
-                new FileDescriptor("", "a", 755, user), // Stdout
-                new FileDescriptor("", "a", 755, user) // Stderr
+                new FileDescriptor("", "w", 777, 0),
+                new FileDescriptor("", "w", 777, 0),
+                new FileDescriptor("", "w", 777, 0)
             ];
-            this.descriptors = 3;
 
             this.cmdline = null;
             this.command = null;
+            this.waiting = false;
             this.suspended = false;
             this.dead = false;
 
@@ -553,15 +648,45 @@ let errno;
                 new Thread(this, this.code.main, this.pid, args)
             ]
         }
-        clone() {
+        clone_descriptors() {
+            let retval = [];
+            for(let descriptor of this.descriptor_table) {
+                if(!descriptor) {
+                    retval.push(undefined);
+                    continue;
+                }
+                retval.push(new FileDescriptor(descriptor.data, descriptor.flags, descriptor.mode, descriptor.user, descriptor.inode, descriptor.filesystem));
+            }
+            return retval;
+        }
+        clone(intermediate_code) {
             let code = Object.assign(Object.create(Object.getPrototypeOf(this.code)), this.code); // Clone the process running code
-            let process = new Process(code, this.user);
+            let process = new Process(code, this.user, this.working_path);
             this.children.push(process);
             process.cmdline = this.cmdline;
             process.command = this.command;
             process.parent = this;
             process.child_index = this.children.length - 1;
-            process.descriptor_table = this.descriptor_table
+            process.descriptor_table = this.clone_descriptors();
+
+            // Run intermediate code because javascript is unable to behave exactly like a real kernel
+            if(intermediate_code) {
+                let _c_process = c_process;
+                let _c_thread = c_thread;
+                let _c_user = c_user;
+                c_process = process;
+                c_thread = process.get_thread(c_thread.pid);
+                c_user = process.user;
+                try {
+                    intermediate_code();
+                } catch (e) {
+                    this.signal(20);
+                    throw new Error("Could not fork process: " + e)
+                }
+                c_process = _c_process;
+                c_thread = _c_thread;
+                c_user = _c_user;
+            }
             return process;
         }
         is_available() {
@@ -572,10 +697,40 @@ let errno;
             return true;
         }
         add_thread(exec, args) {
-            this.threads.push(new Thread(this, exec, pids++, args));
+            this.threads.push(new Thread(this, exec, pids, args));
+            return pids++;
+        }
+        get_thread(pid) {
+            for(let thread of this.threads) {
+                if(thread.pid === pid)
+                    return thread;
+            }
+            return null;
+        }
+        cancel_thread(pid) {
+            let thread = null;
+            let i = 0;
+            for(; i < this.threads.length; i++) {
+                if(this.threads[i].pid === pid) {
+                    thread = this.threads[i];
+                    break;
+                }
+            }
+            if(thread === null) throw new Error("Thread " + pid + " does not exist on this process");
+            this.threads.splice(i, 1);
+        }
+        add_descriptor(descriptor) {
+            for(let i = 0; i <= this.descriptor_table.length; i++) {
+                if(!this.descriptor_table[i]) {
+                    this.descriptor_table[i] = descriptor;
+                    return i;
+                }
+            }
+            return null;
         }
         create_descriptor(descriptor) {
-            this.descriptor_table.push(descriptor);
+            let r = this.add_descriptor(descriptor);
+            if(r === null) throw new Error("Could not create file descriptor: unkown error")
             return this.descriptor_table.length - 1;
         }
         get_descriptor(fd) {
@@ -588,34 +743,49 @@ let errno;
             this.descriptor_table[fd] = undefined;
         }
         duplicate(fd) {
-            for(let i = 0; i <= this.descriptor_table.length; i++) {
-                if(!this.descriptor_table[i]) {
-                    this.descriptor_table[i] = this.get_descriptor(fd);
-                    return i;
-                }
-            }
-            throw new Error("Could not duplicate process: unknown error");
+            return this.add_descriptor(this.get_descriptor(fd))
         }
         signal(code) {
             switch(code) {
                 case 9:
-                    this.dead = true;
+                    this.kill();
                     if(c_process.pid === this.pid) interrupt();
                     break;
             }
-            this.code_table
+            this.waiting = false;
         }
+        kill() {
+            for(let child of this.children) {
+                child.kill();
+            }
+            this.dead = true;
+        }
+        wait() {
+            this.waiting = true;
+        }
+    }
+    let get_process = function(pid) {
+        for(let process of processes)
+            if(process.pid === pid) return process;
     }
     function getpid() {
         return c_process.pid;
     }
-    function fork() {
+    function fork(intermediate_code) {
         if(!c_process) panic("Fork was run outside of kernel context");
-        let process = c_process.clone();
-        processes.push(process);
+        let process = c_process.clone(intermediate_code);
+        if(process)
+            processes.push(process);
+        else
+            return -1;
         return process.pid;
     }
-    function exec(path, args) {
+    function wait() {
+        if(!c_process) panic("wait() was run outside of kernel context");
+        if(c_process.children.length !== 0)
+            c_process.waiting = true;
+    }
+    function exec(path, ...args) {
         let file = get_file(path);
         if(file.incomplete) throw new Error("File at " + path + " does not exist.");
         let code_object = file.inode.get_data();
@@ -623,17 +793,37 @@ let errno;
         c_process.exec(code, args ?? [], full_path(path));
     }
     function thread(exec, args) {
-        c_process.add_thread(exec, args);
+        return c_process.add_thread(exec, args);
+    }
+    function cancel(pid) {
+        c_process.cancel_thread(pid);
     }
     function sleep(time) {
         c_thread.sleep = time;
     }
     function exit() {
-        c_process.dead = true;
+        c_process.kill();
         interrupt();
+    }
+    function kill(pid) {
+        
     }
     function getpid() {
         return c_process.pid;
+    }
+    function getppid() {
+        let parent = c_process.parent;
+        if(!parent) throw new Error("Process does not have a parent.")
+        return parent.pid;
+    }
+    function chdir(path) {
+        let new_working_path = full_path(path);
+        if(!access(new_working_path))
+            throw new Error(new_working_path + " does not exist.");
+        return c_process.working_path = new_working_path;
+    }
+    function getcwd() {
+        return c_process.working_path;
     }
 
     // Scheduler
@@ -654,6 +844,7 @@ let errno;
                 }
             } else if(process.dead) {
                 processes.splice(i, 1);
+                process.parent.signal(20);
                 i--;
                 continue;
             }
@@ -674,7 +865,8 @@ let errno;
                     if(!is_interrupt(e)) {
                         console.error(thread.process.cmdline + " (" + thread.process.pid + ") encountered an error (thread: " + thread.pid + ")");
                         console.error(e);
-                        thread.process.suspended = true;
+                        fprintf(stderr, thread.process.cmdline + " encountered an error: " + e + "\n");
+                        c_process.kill();
                     }
                 }
             }
@@ -741,52 +933,233 @@ let errno;
                 exec("/bin/init");
             }
         }
-        processes.push(new Process(init_code, 0));
+        processes.push(new Process(init_code, 0, "/"));
     }
 
     // Execution loop
     kdebug("Beginning execution loop");
-    setInterval(() => {
-        scheduler();
-    }, 100);
-    setTimeout(() => {
-        console.log(get_file("/bin"))
-    }, 100);
+    interval = setInterval(() => {
+        try {
+            scheduler();
+        } catch (e) {
+            panic("Critical error in kernel.");
+            console.error(e);
+        }
+    }, 10);
 }
+});
+mkfile('/bin');
+mkfile('/bin/init',function(){
+// JUNIX Init system: inspired by FreeBSD rc
+let fd;
+let pid;
+this.main = () => {
+    if(getpid() !== 1) {
+        fprintf(stderr, "init can only run on PID 1\n");
+        exit();
+    }
+
+    fd = fopen("/etc/services", "r");
+    let paths = read(fd).split("\n");
+    for(let path of paths)
+        start(path);
+    fclose(fd);
+    fclose(stdio);
+    fclose(stdin);
+    fclose(stderr);
+
+    pid = thread(post_driver);
+    sleep(-1);
+}
+let wait = false;
+function post_driver() {
+    if(!wait) {
+        wait = true;
+        return;
+    }
+    // Create stdin, stdio, and stderr
+    fopen("/dev/keyboard", "r"); // Stdin
+    fopen("/dev/console", "a"); // Stdio
+    dup(stdio); // Stderr
+
+    fd = fopen("/etc/os-release", "r")
+    let deftable = map_variables(read(fd));
+    printf(get_variable_value("NAME", deftable) + " " +
+            get_variable_value("MAJOR_VERSION", deftable) +
+            " [" + get_variable_value("MINOR_VERSION", deftable) + "]\n\n");
+    fclose(fd);
+
+    printf("Starting /etc/rc\n");
+    fd = fopen("/etc/rc", "r");
+    paths = read(fd).split("\n");
+    for(let path of paths)
+        start(path);
+    printf("\n\n");
+
+    cancel(pid);
+}
+function start (path) {
+    printf("Starting " + path)
+    console.log("starting " + path)
+    fork(() => {
+        fclose(fd);
+        let _fd = fopen("/etc/login.conf", "r");
+        exec(path, "", map_variables(read(_fd)));
+        fclose(_fd);
+        printf(" [" + getpid() + "]\n");
+    });
+}
+});
+mkfile('/bin/modload',function(){
+// This program is responsible for detecting and initializing drivers for all hardware attached at all times
+
+this.main() = () => {
+}
+});
+mkfile('/bin/sh',function(){
+let buffer = "";
+const prompt = "#";
+const cursor_char = "_";
+let paths = [];
+let env;
+let executed = false;
+const version_string = "sh 1.0"
+this.main = function(args, envp) {
+    env = envp;
+
+    paths = get_variable_value("PATH", env).split(":");
+
+    printf(version_string+"\n")
+    reprompt();
+    thread(read_input, []);
+    sleep(-1);
+}
+
+function add_to_buffer(b) {
+    for(let a of b) {
+        switch(a) {
+            case '\b':
+                if(buffer.length - 1 < 0) return false;
+                buffer = buffer.substr(0, buffer.length - 1);
+                break;
+            case '\n':
+                printf("\b\n")
+                if(buffer.length > 0)
+                    execute_command(buffer);
+                else {
+                    reprompt();
+                }
+                return false;
+            default:
+                buffer += a;
+        }
+        return true;
+    }
+}
+function read_input() {
+    if(executed) {
+        buffer = "";
+        reprompt();
+        executed = false;
+    }
+    let b = read(0);
+    if(b.length > 0) {
+        if(add_to_buffer(b))
+            printf('\b' + read(0) + cursor_char);
+    }
+}
+function reprompt() {
+    buffer = "";
+    printf(prompt + " " + cursor_char);
+}
+function find_path(command) {
+    for(let path of paths) {
+        if(listdir(opendir(path)).indexOf(command) !== -1) {
+            return path;
+        }
+    }
+    return "";
+}
+let internal_commands = [
+    ["exit", (args) => {
+        exit();
+    }],
+    ["clear", () => {
+        printf('\?');
+    }],
+    ["cd", (args) => {
+        chdir(args);
+    }],
+    ["pwd", () => {
+        printf(getcwd() + "\n");
+    }]
+]
+function execute_command() {
+    let command = buffer.split(" ")[0];
+    let separator_index = buffer.indexOf(" ");
+    let args = buffer.substring(separator_index + 1, buffer.length);
+    if(args.length === buffer.length) args = "";
+    console.log(args, separator_index);
+    executed = true;
+
+    let callback = internal_commands.find(a => {
+        if (a[0] === command)
+            return true;
+    });
+    if(callback) {
+        try {
+            callback[1](args);
+        } catch (e) {
+            if(!is_interrupt(e))
+                fprintf(stderr, "sh: "+e+"\n")
+        }
+    } else {
+        let cmdline = find_path(command) + "/" + command;
+        if(!access(cmdline)) {
+            fprintf(stderr, "Command "+command+" not found\n");
+            return;
+        }
+        try {
+            fork(() => {
+                exec(cmdline, args, env);
+            });
+            wait();
+        } catch (e) {
+            if(!is_interrupt(e))
+                fprintf(stderr, "sh: " + e + "\n");
+        }
+    }
+}
+});
+mkfile('/bin/mkdir',function(){
+this.main = function(args) {
+    console.log(args);
+    mkdir(args);
+    exit();
+}
+});
+mkfile('/etc');
+mkfile('/etc/fstab',`/dev/disk0 /home`);
+mkfile('/etc/os-release',`NAME=JUNIX
+MAJOR_VERSION=1
+MINOR_VERSION=1.0 Alpha`);
+mkfile('/etc/rc',`/bin/sh`);
+mkfile('/etc/login.conf',`PATH=/bin:/usr/bin:/usr/local/bin`);
+mkfile('/etc/services',`/service/disk
+/service/mount
+/service/keyboard
+/service/console`);
+mkfile('/var');
+mkfile('/var/modalias',function(){
+
 });
 mkfile('/service');
-mkfile('/service/serial',function(){
-this.main = function() {
-
-}
-});
 mkfile('/service/mount',function(){
 this.main = function() {
     // Mount permanent storage
     mount("/dev/disk0", "/home");
     exit();
 }
-});
-mkfile('/service/keyboard',function(){
-let fd;
-let keys = "";
-
-function keyupdate() {
-    write(fd, keys);
-}
-this.main = function() {
-    fd = fopen("/dev/keyboard", "w", 777);
-    thread(keyupdate, []);
-    sleep(-1);
-}
-
-document.addEventListener("keydown", (e) => {
-    keys+=e.key;
-});
-
-document.addEventListener("keyup", (e) => {
-    keys = keys.replaceAll(e.key, "");
-});
 });
 mkfile('/service/disk',function(){
 let disks = 0;
@@ -799,18 +1172,17 @@ this.main = function() {
             if(string == null) break;
             fs = new JFS();
             fs.parse(string);
-            console.log(fd);
             fd = fopen("/dev/disk" + disks++, "w");
-            console.log(read(fd), fd);
+            printf("Created /dev/disk" + (disks-1) + "\n");
             write(fd, fs);
             fclose(fd);
         }
         if(localStorage.length === 0) throw "Needs initialization";
-        console.log("On-device storage has been mapped", disks);
+        printf("On-device storage has been mapped \n");
     } catch (e) {
-        console.log(e);
+        printf(e);
         create_disk();
-        console.log("On-device storage initialized");
+        printf("On-device storage initialized\n");
     }
     fd = fopen("/dev/localstorage", "w");
     sleep(-1);
@@ -822,7 +1194,7 @@ function create_disk() {
     let _fd = fopen("/dev/disk" + disks, "w");
     write(_fd, fs);
     fclose(_fd);
-    console.log("Created /dev/disk" + disks++);
+    printf("Created /dev/disk" + disks++ + "\n");
 }
 let input;
 function call_watcher() {
@@ -836,6 +1208,48 @@ function call_watcher() {
     sleep(10);
 }
 });
+mkfile('/service/keyboard',function(){
+let fd;
+let keys = "";
+
+function keyupdate() {
+    write(fd, keys);
+    keys = "";
+}
+this.main = function() {
+    fd = fopen("/dev/keyboard", "w", 777);
+    thread(keyupdate, []);
+    sleep(-1);
+}
+
+const key_replacements = [
+    ["Backspace", '\b'],
+    [' ', ' '],
+    ["Shift", ''],
+    ["Enter", '\n'],
+    ["Meta", '']
+]
+
+function replace_keys(key) {
+    for(let r of key_replacements)
+        if(r[0] === key)
+            return r[1];
+    return key;
+}
+
+document.addEventListener("keydown", (e) => {
+    keys += replace_keys(e.key);
+});
+
+document.addEventListener("keyup", (e) => {
+    keys = keys.replaceAll(replace_keys(e.key), "");
+});
+});
+mkfile('/service/serial',function(){
+this.main = function() {
+
+}
+});
 mkfile('/service/console',function(){
 let fd, element;
 let update_display = function() {
@@ -844,117 +1258,28 @@ let update_display = function() {
     let char;
     for(let i = 0; i < string.length; i++) {
         char = string[i];
-        console.log(char);
         switch(char) {
             case "\b":
                 buff = buff.substring(0, buff.length - 1);
+                break;
+            case '\?':
+                buff = "";
                 break;
             default:
                 buff += char;
                 break;
         }
     }
-    element.innerText = buff
+    if(string.length > 0)
+        element.innerText = buff
     write(fd, "");
-    sleep(5);
+    sleep(30);
 }
 this.main = function() {
     element = document.getElementById("console");
     fd = fopen("/dev/console", "w");
     sleep(-1);
     thread(update_display, []);
-}
-});
-mkfile('/bin');
-mkfile('/bin/modload',function(){
-// This program is responsible for detecting and initializing drivers for all hardware attached at all times
-
-this.main() = () => {
-}
-});
-mkfile('/bin/init',function(){
-// JUNIX Init system: inspired by FreeBSD rc
-this.main = () => {
-    let fd = fopen("/etc/rc", "r");
-    let paths = read(fd).split("\n");
-    for(let path of paths)
-        this.open(path);
-    sleep(-1);
-}
-this.open = function(path) {
-    console.log("Initializing " + path)
-    exec(path);
-    fork();
-}
-});
-mkfile('/bin/sh',function(){
-let command = "";
-let prompt = "#";
-this.main = function(...args) {
-    let child = false;
-    for(let arg of args) {
-        if(arg === "child=true") {
-            child = true;
-            break;
-        }
-    }
-    if(!child) {
-        // Set stdin and stout as /dev/keyboard and /dev/console
-        fclose(0);
-        fclose(1);
-        fclose(2);
-
-        let fd = fopen("/dev/keyboard", "r");
-        dup(fd);
-        fclose(fd);
-        fd = fopen("/dev/console", "w");
-        dup(fd);
-        dup(fd);
-        fclose(fd);
-    }
-    sleep(-1);
-    thread(read_input, []);
-    thread(blink_cursor, []);
-}
-
-function read_input() {
-    let b = read(0);
-    printf(read(0));
-}
-let on = false;
-function blink_cursor() {
-    if(!on)
-        set_cursor_on();
-    else
-        set_cursor_off();
-
-    sleep(2000);
-}
-function set_cursor_off() {
-    if(on) {
-        del();
-        on = false;
-    }
-}
-function set_cursor_on() {
-    if(!on) {
-        printf("█");
-        on = true;
-    }
-}
-
-function write_string(string) {
-    let fd = fopen("/dev/console", "a")
-    write(fd, string);
-    fclose(fd)
-}
-
-function del(count) {
-    let string = "";
-    for(let i = 0; i < count ?? 1; i++) {
-        string += "\b"
-    }
-    write_string("\b");
 }
 });
 /* boot.js */
@@ -1012,7 +1337,9 @@ let errno;
     }
 
     //Panic
+    let interval;
     let panic = function(message) {
+        clearInterval(interval);
         alert("Panic! -> " + message);
         console.error("Kernel panic (" + get_time() + ")");
         console.error(message);
@@ -1038,25 +1365,28 @@ let errno;
             this.buffer = data;
             this.events = [];
         }
-        read() {
+        update_buffer() {
             if(this.inode)
-                this.buffer = this.inode.get_data(); // Update buffer
+                this.buffer = this.inode.get_data();
+        }
+        read() {
+            this.update_buffer();
             return this.buffer;
         }
         listdir() {
             if(this.filetype !== "d") throw new Error("Cannot execute listdir(): not a directory");
-            console.log(this.buffer)
             let names = [];
             for(let i of this.buffer)
                 names.push(this.filesystem.get_inode(i).filename);
             return names;
         }
         write(data) {
-            if(this.filetype !== "-") throw new Error("Cannot write to a non-normal file");
+            if(this.filetype !== "-" && this.filetype) throw new Error("Cannot write to a non-normal file");
             this.buffer = data;
             this.flush();
         }
         append(data) {
+            this.update_buffer();
             this.write(this.buffer + data);
         }
         flush() {
@@ -1072,6 +1402,7 @@ let errno;
         let file = get_file(path);
         let inode = file.inode;
         if(file.incomplete) {
+            if(flags === "r") throw new Error("File " + path + " does not exist");
             kdebug("Creating file at " + path);
             inode = file.filesystem.create_file(inode.index, path, "", "-", c_user, mode ?? inode.mode);
         }
@@ -1086,7 +1417,6 @@ let errno;
         let descriptor = c_process.get_descriptor(fd);
         switch(descriptor.flags) {
             case 'r':
-                console.log(descriptor.flags)
                 throw new Error("Cannot write to a file descriptor opened as readonly");
             case 'w':
                 descriptor.write(data);
@@ -1095,6 +1425,9 @@ let errno;
                 descriptor.append(data);
                 break;
         }
+    }
+    function access(path) {
+        return !(get_file(path).incomplete);
     }
     function dup(fd) {
         c_process.duplicate(fd);
@@ -1155,19 +1488,28 @@ let errno;
     }
 
     // Kernel file tools
-    let working_path = "/";
+    let full_path_dirty = function(path) {
+        if(path.length === 0) throw new Error("Invalid path");
+        let working_path = "";
+        if(path[0] !== "/") {
+            working_path = "/";
+            if(c_process)
+                working_path = c_process.working_path;
+        }
+        return working_path + "/" + path;
+    }
+    let map_full_path_names = function(path) {
+        return map_path_names(full_path_dirty(path))
+    }
     let full_path = function(path) {
-        let input_paths = map_path_names(path);
-        let working_paths = map_path_names(working_path);
-        let paths = working_paths.concat(input_paths);
-        return consolidate_path_names(paths);
+        return consolidate_path_names(map_full_path_names(path));
     }
     let get_file = function(path) {
         if(!path) throw new Error("No path specified");
-        let path_names = map_path_names(full_path(path));
+        let path_names = map_full_path_names(path);
         let filesystem = root_fs;
         let index = 0;
-        let inode;
+        let inode = filesystem.get_inode(index);
         let name_index = 0;
 
         let steps = path_names.length;
@@ -1204,16 +1546,6 @@ let errno;
             incomplete: steps !== 0
         };
     }
-
-    // Interrupts
-    const interrupt_string = "interrupt"
-    let interrupt = function() {
-        throw interrupt_string;
-    }
-    let is_interrupt = function(string) {
-        if(string === interrupt_string) return true;
-        return false;
-    }
     
     // Process
     let processes = [];
@@ -1230,7 +1562,7 @@ let errno;
             this.last_exec = get_time(3);
         }
         is_ready(time) {
-            if(this.sleep < 0) return 0;
+            if(this.sleep < 0) return false;
             if(time >= this.last_exec + this.sleep)
                 return true;
             return false;
@@ -1242,14 +1574,14 @@ let errno;
     class Process {
         constructor(code_object, user, working_path) {
             this.descriptor_table = [
-                new FileDescriptor("", "a", 755, user), // Stdin
-                new FileDescriptor("", "a", 755, user), // Stdout
-                new FileDescriptor("", "a", 755, user) // Stderr
+                new FileDescriptor("", "w", 777, 0),
+                new FileDescriptor("", "w", 777, 0),
+                new FileDescriptor("", "w", 777, 0)
             ];
-            this.descriptors = 3;
 
             this.cmdline = null;
             this.command = null;
+            this.waiting = false;
             this.suspended = false;
             this.dead = false;
 
@@ -1276,15 +1608,45 @@ let errno;
                 new Thread(this, this.code.main, this.pid, args)
             ]
         }
-        clone() {
+        clone_descriptors() {
+            let retval = [];
+            for(let descriptor of this.descriptor_table) {
+                if(!descriptor) {
+                    retval.push(undefined);
+                    continue;
+                }
+                retval.push(new FileDescriptor(descriptor.data, descriptor.flags, descriptor.mode, descriptor.user, descriptor.inode, descriptor.filesystem));
+            }
+            return retval;
+        }
+        clone(intermediate_code) {
             let code = Object.assign(Object.create(Object.getPrototypeOf(this.code)), this.code); // Clone the process running code
-            let process = new Process(code, this.user);
+            let process = new Process(code, this.user, this.working_path);
             this.children.push(process);
             process.cmdline = this.cmdline;
             process.command = this.command;
             process.parent = this;
             process.child_index = this.children.length - 1;
-            process.descriptor_table = this.descriptor_table
+            process.descriptor_table = this.clone_descriptors();
+
+            // Run intermediate code because javascript is unable to behave exactly like a real kernel
+            if(intermediate_code) {
+                let _c_process = c_process;
+                let _c_thread = c_thread;
+                let _c_user = c_user;
+                c_process = process;
+                c_thread = process.get_thread(c_thread.pid);
+                c_user = process.user;
+                try {
+                    intermediate_code();
+                } catch (e) {
+                    this.signal(20);
+                    throw new Error("Could not fork process: " + e)
+                }
+                c_process = _c_process;
+                c_thread = _c_thread;
+                c_user = _c_user;
+            }
             return process;
         }
         is_available() {
@@ -1295,10 +1657,40 @@ let errno;
             return true;
         }
         add_thread(exec, args) {
-            this.threads.push(new Thread(this, exec, pids++, args));
+            this.threads.push(new Thread(this, exec, pids, args));
+            return pids++;
+        }
+        get_thread(pid) {
+            for(let thread of this.threads) {
+                if(thread.pid === pid)
+                    return thread;
+            }
+            return null;
+        }
+        cancel_thread(pid) {
+            let thread = null;
+            let i = 0;
+            for(; i < this.threads.length; i++) {
+                if(this.threads[i].pid === pid) {
+                    thread = this.threads[i];
+                    break;
+                }
+            }
+            if(thread === null) throw new Error("Thread " + pid + " does not exist on this process");
+            this.threads.splice(i, 1);
+        }
+        add_descriptor(descriptor) {
+            for(let i = 0; i <= this.descriptor_table.length; i++) {
+                if(!this.descriptor_table[i]) {
+                    this.descriptor_table[i] = descriptor;
+                    return i;
+                }
+            }
+            return null;
         }
         create_descriptor(descriptor) {
-            this.descriptor_table.push(descriptor);
+            let r = this.add_descriptor(descriptor);
+            if(r === null) throw new Error("Could not create file descriptor: unkown error")
             return this.descriptor_table.length - 1;
         }
         get_descriptor(fd) {
@@ -1311,34 +1703,49 @@ let errno;
             this.descriptor_table[fd] = undefined;
         }
         duplicate(fd) {
-            for(let i = 0; i <= this.descriptor_table.length; i++) {
-                if(!this.descriptor_table[i]) {
-                    this.descriptor_table[i] = this.get_descriptor(fd);
-                    return i;
-                }
-            }
-            throw new Error("Could not duplicate process: unknown error");
+            return this.add_descriptor(this.get_descriptor(fd))
         }
         signal(code) {
             switch(code) {
                 case 9:
-                    this.dead = true;
+                    this.kill();
                     if(c_process.pid === this.pid) interrupt();
                     break;
             }
-            this.code_table
+            this.waiting = false;
         }
+        kill() {
+            for(let child of this.children) {
+                child.kill();
+            }
+            this.dead = true;
+        }
+        wait() {
+            this.waiting = true;
+        }
+    }
+    let get_process = function(pid) {
+        for(let process of processes)
+            if(process.pid === pid) return process;
     }
     function getpid() {
         return c_process.pid;
     }
-    function fork() {
+    function fork(intermediate_code) {
         if(!c_process) panic("Fork was run outside of kernel context");
-        let process = c_process.clone();
-        processes.push(process);
+        let process = c_process.clone(intermediate_code);
+        if(process)
+            processes.push(process);
+        else
+            return -1;
         return process.pid;
     }
-    function exec(path, args) {
+    function wait() {
+        if(!c_process) panic("wait() was run outside of kernel context");
+        if(c_process.children.length !== 0)
+            c_process.waiting = true;
+    }
+    function exec(path, ...args) {
         let file = get_file(path);
         if(file.incomplete) throw new Error("File at " + path + " does not exist.");
         let code_object = file.inode.get_data();
@@ -1346,17 +1753,37 @@ let errno;
         c_process.exec(code, args ?? [], full_path(path));
     }
     function thread(exec, args) {
-        c_process.add_thread(exec, args);
+        return c_process.add_thread(exec, args);
+    }
+    function cancel(pid) {
+        c_process.cancel_thread(pid);
     }
     function sleep(time) {
         c_thread.sleep = time;
     }
     function exit() {
-        c_process.dead = true;
+        c_process.kill();
         interrupt();
+    }
+    function kill(pid) {
+        
     }
     function getpid() {
         return c_process.pid;
+    }
+    function getppid() {
+        let parent = c_process.parent;
+        if(!parent) throw new Error("Process does not have a parent.")
+        return parent.pid;
+    }
+    function chdir(path) {
+        let new_working_path = full_path(path);
+        if(!access(new_working_path))
+            throw new Error(new_working_path + " does not exist.");
+        return c_process.working_path = new_working_path;
+    }
+    function getcwd() {
+        return c_process.working_path;
     }
 
     // Scheduler
@@ -1377,6 +1804,7 @@ let errno;
                 }
             } else if(process.dead) {
                 processes.splice(i, 1);
+                process.parent.signal(20);
                 i--;
                 continue;
             }
@@ -1397,7 +1825,8 @@ let errno;
                     if(!is_interrupt(e)) {
                         console.error(thread.process.cmdline + " (" + thread.process.pid + ") encountered an error (thread: " + thread.pid + ")");
                         console.error(e);
-                        thread.process.suspended = true;
+                        fprintf(stderr, thread.process.cmdline + " encountered an error: " + e + "\n");
+                        c_process.kill();
                     }
                 }
             }
@@ -1464,15 +1893,17 @@ let errno;
                 exec("/bin/init");
             }
         }
-        processes.push(new Process(init_code, 0));
+        processes.push(new Process(init_code, 0, "/"));
     }
 
     // Execution loop
     kdebug("Beginning execution loop");
-    setInterval(() => {
-        scheduler();
-    }, 100);
-    setTimeout(() => {
-        console.log(get_file("/bin"))
-    }, 100);
+    interval = setInterval(() => {
+        try {
+            scheduler();
+        } catch (e) {
+            panic("Critical error in kernel.");
+            console.error(e);
+        }
+    }, 10);
 }

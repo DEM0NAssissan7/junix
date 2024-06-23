@@ -8,18 +8,17 @@ this.main = function() {
             if(string == null) break;
             fs = new JFS();
             fs.parse(string);
-            console.log(fd);
             fd = fopen("/dev/disk" + disks++, "w");
-            console.log(read(fd), fd);
+            printf("Created /dev/disk" + (disks-1) + "\n");
             write(fd, fs);
             fclose(fd);
         }
         if(localStorage.length === 0) throw "Needs initialization";
-        console.log("On-device storage has been mapped", disks);
+        printf("On-device storage has been mapped \n");
     } catch (e) {
-        console.log(e);
+        printf(e);
         create_disk();
-        console.log("On-device storage initialized");
+        printf("On-device storage initialized\n");
     }
     fd = fopen("/dev/localstorage", "w");
     sleep(-1);
@@ -31,7 +30,7 @@ function create_disk() {
     let _fd = fopen("/dev/disk" + disks, "w");
     write(_fd, fs);
     fclose(_fd);
-    console.log("Created /dev/disk" + disks++);
+    printf("Created /dev/disk" + disks++ + "\n");
 }
 let input;
 function call_watcher() {
