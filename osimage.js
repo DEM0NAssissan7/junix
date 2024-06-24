@@ -178,6 +178,9 @@ function get_variable_value(identifier, deftable) {
     }
     return NaN;
 }
+function map_options(args) {
+    
+}
 /* libraries/stdlib.js */
 const stdin = 0;
 const stdio = 1;
@@ -283,31 +286,10 @@ let mkfile = function(path, data) {
     else if(!data)
         initfs_table.push([path]);
 }
-mkfile('/home');
 mkfile('/usr');
+mkfile('/usr/local');
+mkfile('/usr/local/bin');
 mkfile('/usr/bin');
-mkfile('/usr/bin/cat',function(){
-this.main = function(args) {
-    let fd = fopen(args, "r");
-    printf(read(fd) + '\n');
-    fclose(fd);
-    exit();
-}
-});
-mkfile('/usr/bin/js',function(){
-this.main = function(args) {
-    let fd = fopen(args, "r");
-    (function(){(read(fd))();})()
-    exit();
-}
-});
-mkfile('/usr/bin/mklclstr',function(){
-// Make local storage
-
-this.main = function(args) {
-    
-}
-});
 mkfile('/usr/bin/ls',function(){
 this.main = function(args) {
     let fd;
@@ -323,8 +305,137 @@ this.main = function(args) {
     exit();
 }
 });
-mkfile('/usr/local');
-mkfile('/usr/local/bin');
+mkfile('/usr/bin/mklclstr',function(){
+// Make local storage
+
+this.main = function(args) {
+    
+}
+});
+mkfile('/usr/bin/pico',function(){
+let buffer = "";
+let cursor = 0;
+let filename = "";
+let dir = "";
+let filetype;
+this.main = function(args) {
+    filename = get_filename(args);
+    dir = dirname(args);
+    let fd = fopen(args, "r");
+    buffer = read(fd);
+    filetype = typeof buffer;
+    if(filetype !== "string")
+        buffer = buffer.toString();
+    fclose(fd);
+    
+    draw_screen();
+    thread(read_input);
+    sleep(-1)
+}
+
+function write_changes() {
+    let fd = fopen(dir, "w");
+    if(filetype === "function") {
+        buffer = (new Function("return " + buffer))();
+    }
+    write(fd, buffer);
+    fclose(fd);
+    printf("\nWrote changes to " + dir + "...\n");
+}
+function read_input() {
+    let b = read(stdin);
+    if(b.length > 0) {
+        // Do key things
+        switch(b) {
+            case "Escape":
+                write_changes();
+                exit();
+                break;
+            case "ArrowLeft":
+                move_cursor(-1)
+                break;
+            case "ArrowRight":
+                move_cursor(1)
+                break;
+            case "ArrowUp":
+                //TODO
+                break;
+            case "ArrowDown":
+                //TODO
+                break;
+            default:
+                for(let char of b) {
+                    switch(char) {
+                        case '\b':
+                            buffer = del_char(buffer, cursor);
+                            move_cursor(-1)
+                            break;
+                        default:
+                            buffer = place_char(buffer, char, cursor);
+                            move_cursor(1);
+                            break;
+                    }
+                }
+        }
+        draw_screen();
+    }
+}
+function draw_screen() {
+    printf("\?");
+
+    printf("file: "+dir + "\n\n" + place_char(buffer, "|", cursor));
+}
+
+function move_cursor(value) {
+    cursor += value;
+    if(cursor < 0)
+        cursor = 0;
+    if(cursor > buffer.length)
+        cursor = buffer.length;
+}
+
+function place_char(buff, char, index) {
+    let buf1 = buff.substring(0, index);
+    let buf2 = buff.substring(index, buff.length);
+    return buf1 + char + buf2;
+}
+function del_char(buff, index) {
+    let buf1 = buff.substring(0, index - 1);
+    let buf2 = buff.substring(index, buff.length);
+    return buf1 + buf2;
+}
+});
+mkfile('/usr/bin/cat',function(){
+this.main = function(args) {
+    let fd = fopen(args, "r");
+    printf(read(fd) + '\n');
+    fclose(fd);
+    exit();
+}
+});
+mkfile('/usr/bin/js',function(){
+this.main = function(args) {
+    let fd = fopen(args, "r");
+    (function(){(read(fd))();})()
+    exit();
+}
+});
+mkfile('/home');
+mkfile('/var');
+mkfile('/var/modalias',function(){
+
+});
+mkfile('/etc');
+mkfile('/etc/fstab',`/dev/disk0 /home`);
+mkfile('/etc/services',`/service/disk
+/service/mount
+/service/keyboard
+/service/console`);
+mkfile('/etc/rc',`/bin/sh`);
+mkfile('/etc/login.conf',`PATH=/bin:/usr/bin:/usr/local/bin`);
+mkfile('/etc/os-release',`NAME=JUNIX
+MAJOR_VERSION=1
+MINOR_VERSION=1.0 Alpha`);
 mkfile('/boot');
 mkfile('/boot/kernel',function(){
 /* JUNIX Kernel: The heart of the operating system
@@ -495,6 +606,9 @@ let errno;
     function closedir(fd) {
         let descriptor = c_process.get_descriptor(fd);
         c_process.close(descriptor);
+    }
+    function dirname(path) {
+        return full_path(path);
     }
 
     // Mounting
@@ -805,8 +919,10 @@ let errno;
         c_process.kill();
         interrupt();
     }
-    function kill(pid) {
-        
+    function kill(pid, sig) {
+        let process = get_process(pid)
+        if(!process) throw new Error("No process with PID " + pid);
+        process.signal(sig);
     }
     function getpid() {
         return c_process.pid;
@@ -948,7 +1064,151 @@ let errno;
     }, 10);
 }
 });
+mkfile('/service');
+mkfile('/service/serial',function(){
+this.main = function() {
+
+}
+});
+mkfile('/service/mount',function(){
+this.main = function() {
+    // Mount permanent storage
+    mount("/dev/disk0", "/home");
+    exit();
+}
+});
+mkfile('/service/keyboard',function(){
+let fd;
+let keys = "";
+
+function keyupdate() {
+    write(fd, keys);
+    keys = "";
+}
+this.main = function() {
+    fd = fopen("/dev/keyboard", "w", 777);
+    thread(keyupdate, []);
+    sleep(-1);
+}
+
+const key_replacements = [
+    ["Backspace", '\b'],
+    [' ', ' '],
+    ["Shift", ''],
+    ["Enter", '\n'],
+    ["Meta", ''],
+    ["Control", '\c']
+]
+
+function replace_keys(key) {
+    for(let r of key_replacements)
+        if(r[0] === key)
+            return r[1];
+    return key;
+}
+
+document.addEventListener("keydown", (e) => {
+    keys += replace_keys(e.key);
+    e.preventDefault();
+});
+
+document.addEventListener("keyup", (e) => {
+    keys = keys.replaceAll(replace_keys(e.key), "");
+});
+});
+mkfile('/service/disk',function(){
+let disks = 0;
+let fd;
+this.main = function() {
+    try {
+        let string, fd, fs;
+        for(let i = 0; i < localStorage.length; i++) {
+            string = localStorage.getItem("disk" + i);
+            if(string == null) break;
+            fs = new JFS();
+            fs.parse(string);
+            fd = fopen("/dev/disk" + disks++, "w");
+            printf("Created /dev/disk" + (disks-1) + "\n");
+            write(fd, fs);
+            fclose(fd);
+        }
+        if(localStorage.length === 0) throw "Needs initialization";
+        printf("On-device storage has been mapped \n");
+    } catch (e) {
+        printf(e);
+        create_disk();
+        printf("On-device storage initialized\n");
+    }
+    fd = fopen("/dev/localstorage", "w");
+    sleep(-1);
+    thread(call_watcher, []);
+}
+function create_disk() {
+    let fs = new JFS();
+    localStorage.setItem("disk" + disks, "");
+    let _fd = fopen("/dev/disk" + disks, "w");
+    write(_fd, fs);
+    fclose(_fd);
+    printf("Created /dev/disk" + disks++ + "\n");
+}
+let input;
+function call_watcher() {
+    input = read(fd);
+    if(input.length > 0) {
+        if(input == "c") {
+            create_disk();
+        }
+    }
+    write(fd, "");
+    sleep(10);
+}
+});
+mkfile('/service/console',function(){
+let fd, element;
+let update_display = function() {
+    let string = read(fd);
+    let buff = element.innerText;
+    let char;
+    for(let i = 0; i < string.length; i++) {
+        char = string[i];
+        switch(char) {
+            case "\b":
+                buff = buff.substring(0, buff.length - 1);
+                break;
+            case '\?':
+                buff = "";
+                break;
+            default:
+                buff += char;
+                break;
+        }
+    }
+    if(string.length > 0)
+        element.innerText = buff
+    write(fd, "");
+    sleep(30);
+}
+this.main = function() {
+    element = document.getElementById("console");
+    fd = fopen("/dev/console", "w");
+    sleep(-1);
+    thread(update_display, []);
+}
+});
 mkfile('/bin');
+mkfile('/bin/modload',function(){
+// This program is responsible for detecting and initializing drivers for all hardware attached at all times
+
+this.main() = () => {
+}
+});
+mkfile('/bin/mkdir',function(){
+this.main = function(args) {
+    console.log(args);
+    mkdir(args);
+    exit();
+}
+});
 mkfile('/bin/init',function(){
 // JUNIX Init system: inspired by FreeBSD rc
 let fd;
@@ -1010,10 +1270,9 @@ function start (path) {
     });
 }
 });
-mkfile('/bin/modload',function(){
-// This program is responsible for detecting and initializing drivers for all hardware attached at all times
-
-this.main() = () => {
+mkfile('/bin/kill',function(){
+this.main = function(args) {
+    
 }
 });
 mkfile('/bin/sh',function(){
@@ -1099,7 +1358,6 @@ function execute_command() {
     let separator_index = buffer.indexOf(" ");
     let args = buffer.substring(separator_index + 1, buffer.length);
     if(args.length === buffer.length) args = "";
-    console.log(args, separator_index);
     executed = true;
 
     let callback = internal_commands.find(a => {
@@ -1129,157 +1387,6 @@ function execute_command() {
                 fprintf(stderr, "sh: " + e + "\n");
         }
     }
-}
-});
-mkfile('/bin/mkdir',function(){
-this.main = function(args) {
-    console.log(args);
-    mkdir(args);
-    exit();
-}
-});
-mkfile('/etc');
-mkfile('/etc/fstab',`/dev/disk0 /home`);
-mkfile('/etc/os-release',`NAME=JUNIX
-MAJOR_VERSION=1
-MINOR_VERSION=1.0 Alpha`);
-mkfile('/etc/rc',`/bin/sh`);
-mkfile('/etc/login.conf',`PATH=/bin:/usr/bin:/usr/local/bin`);
-mkfile('/etc/services',`/service/disk
-/service/mount
-/service/keyboard
-/service/console`);
-mkfile('/var');
-mkfile('/var/modalias',function(){
-
-});
-mkfile('/service');
-mkfile('/service/mount',function(){
-this.main = function() {
-    // Mount permanent storage
-    mount("/dev/disk0", "/home");
-    exit();
-}
-});
-mkfile('/service/disk',function(){
-let disks = 0;
-let fd;
-this.main = function() {
-    try {
-        let string, fd, fs;
-        for(let i = 0; i < localStorage.length; i++) {
-            string = localStorage.getItem("disk" + i);
-            if(string == null) break;
-            fs = new JFS();
-            fs.parse(string);
-            fd = fopen("/dev/disk" + disks++, "w");
-            printf("Created /dev/disk" + (disks-1) + "\n");
-            write(fd, fs);
-            fclose(fd);
-        }
-        if(localStorage.length === 0) throw "Needs initialization";
-        printf("On-device storage has been mapped \n");
-    } catch (e) {
-        printf(e);
-        create_disk();
-        printf("On-device storage initialized\n");
-    }
-    fd = fopen("/dev/localstorage", "w");
-    sleep(-1);
-    thread(call_watcher, []);
-}
-function create_disk() {
-    let fs = new JFS();
-    localStorage.setItem("disk" + disks, "");
-    let _fd = fopen("/dev/disk" + disks, "w");
-    write(_fd, fs);
-    fclose(_fd);
-    printf("Created /dev/disk" + disks++ + "\n");
-}
-let input;
-function call_watcher() {
-    input = read(fd);
-    if(input.length > 0) {
-        if(input == "c") {
-            create_disk();
-        }
-    }
-    write(fd, "");
-    sleep(10);
-}
-});
-mkfile('/service/keyboard',function(){
-let fd;
-let keys = "";
-
-function keyupdate() {
-    write(fd, keys);
-    keys = "";
-}
-this.main = function() {
-    fd = fopen("/dev/keyboard", "w", 777);
-    thread(keyupdate, []);
-    sleep(-1);
-}
-
-const key_replacements = [
-    ["Backspace", '\b'],
-    [' ', ' '],
-    ["Shift", ''],
-    ["Enter", '\n'],
-    ["Meta", '']
-]
-
-function replace_keys(key) {
-    for(let r of key_replacements)
-        if(r[0] === key)
-            return r[1];
-    return key;
-}
-
-document.addEventListener("keydown", (e) => {
-    keys += replace_keys(e.key);
-});
-
-document.addEventListener("keyup", (e) => {
-    keys = keys.replaceAll(replace_keys(e.key), "");
-});
-});
-mkfile('/service/serial',function(){
-this.main = function() {
-
-}
-});
-mkfile('/service/console',function(){
-let fd, element;
-let update_display = function() {
-    let string = read(fd);
-    let buff = element.innerText;
-    let char;
-    for(let i = 0; i < string.length; i++) {
-        char = string[i];
-        switch(char) {
-            case "\b":
-                buff = buff.substring(0, buff.length - 1);
-                break;
-            case '\?':
-                buff = "";
-                break;
-            default:
-                buff += char;
-                break;
-        }
-    }
-    if(string.length > 0)
-        element.innerText = buff
-    write(fd, "");
-    sleep(30);
-}
-this.main = function() {
-    element = document.getElementById("console");
-    fd = fopen("/dev/console", "w");
-    sleep(-1);
-    thread(update_display, []);
 }
 });
 /* boot.js */
@@ -1456,6 +1563,9 @@ let errno;
         let descriptor = c_process.get_descriptor(fd);
         c_process.close(descriptor);
     }
+    function dirname(path) {
+        return full_path(path);
+    }
 
     // Mounting
     let mount_table = [];
@@ -1765,8 +1875,10 @@ let errno;
         c_process.kill();
         interrupt();
     }
-    function kill(pid) {
-        
+    function kill(pid, sig) {
+        let process = get_process(pid)
+        if(!process) throw new Error("No process with PID " + pid);
+        process.signal(sig);
     }
     function getpid() {
         return c_process.pid;

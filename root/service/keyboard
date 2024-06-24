@@ -16,7 +16,8 @@ const key_replacements = [
     [' ', ' '],
     ["Shift", ''],
     ["Enter", '\n'],
-    ["Meta", '']
+    ["Meta", ''],
+    ["Control", '\c']
 ]
 
 function replace_keys(key) {
@@ -28,6 +29,7 @@ function replace_keys(key) {
 
 document.addEventListener("keydown", (e) => {
     keys += replace_keys(e.key);
+    e.preventDefault();
 });
 
 document.addEventListener("keyup", (e) => {

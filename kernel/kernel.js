@@ -167,6 +167,9 @@ let errno;
         let descriptor = c_process.get_descriptor(fd);
         c_process.close(descriptor);
     }
+    function dirname(path) {
+        return full_path(path);
+    }
 
     // Mounting
     let mount_table = [];

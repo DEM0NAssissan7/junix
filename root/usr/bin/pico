@@ -1,0 +1,91 @@
+let buffer = "";
+let cursor = 0;
+let filename = "";
+let dir = "";
+let filetype;
+this.main = function(args) {
+    filename = get_filename(args);
+    dir = dirname(args);
+    let fd = fopen(args, "r");
+    buffer = read(fd);
+    filetype = typeof buffer;
+    if(filetype !== "string")
+        buffer = buffer.toString();
+    fclose(fd);
+    
+    draw_screen();
+    thread(read_input);
+    sleep(-1)
+}
+
+function write_changes() {
+    let fd = fopen(dir, "w");
+    if(filetype === "function") {
+        buffer = (new Function("return " + buffer))();
+    }
+    write(fd, buffer);
+    fclose(fd);
+    printf("\nWrote changes to " + dir + "...\n");
+}
+function read_input() {
+    let b = read(stdin);
+    if(b.length > 0) {
+        // Do key things
+        switch(b) {
+            case "Escape":
+                write_changes();
+                exit();
+                break;
+            case "ArrowLeft":
+                move_cursor(-1)
+                break;
+            case "ArrowRight":
+                move_cursor(1)
+                break;
+            case "ArrowUp":
+                //TODO
+                break;
+            case "ArrowDown":
+                //TODO
+                break;
+            default:
+                for(let char of b) {
+                    switch(char) {
+                        case '\b':
+                            buffer = del_char(buffer, cursor);
+                            move_cursor(-1)
+                            break;
+                        default:
+                            buffer = place_char(buffer, char, cursor);
+                            move_cursor(1);
+                            break;
+                    }
+                }
+        }
+        draw_screen();
+    }
+}
+function draw_screen() {
+    printf("\?");
+
+    printf("file: "+dir + "\n\n" + place_char(buffer, "|", cursor));
+}
+
+function move_cursor(value) {
+    cursor += value;
+    if(cursor < 0)
+        cursor = 0;
+    if(cursor > buffer.length)
+        cursor = buffer.length;
+}
+
+function place_char(buff, char, index) {
+    let buf1 = buff.substring(0, index);
+    let buf2 = buff.substring(index, buff.length);
+    return buf1 + char + buf2;
+}
+function del_char(buff, index) {
+    let buf1 = buff.substring(0, index - 1);
+    let buf2 = buff.substring(index, buff.length);
+    return buf1 + buf2;
+}

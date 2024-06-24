@@ -80,7 +80,6 @@ function execute_command() {
     let separator_index = buffer.indexOf(" ");
     let args = buffer.substring(separator_index + 1, buffer.length);
     if(args.length === buffer.length) args = "";
-    console.log(args, separator_index);
     executed = true;
 
     let callback = internal_commands.find(a => {
