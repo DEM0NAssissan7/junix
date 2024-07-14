@@ -5,39 +5,22 @@ let paths = [];
 let env;
 let executed = false;
 const version_string = "sh 1.0"
+let init = false;
+let condition_met = true;
 this.main = function(args, envp) {
-    env = envp;
-
-    paths = get_variable_value("PATH", env).split(":");
-
-    printf(version_string+"\n")
-    reprompt();
-    thread(read_input, []);
-    sleep(-1);
-}
-
-function add_to_buffer(b) {
-    for(let a of b) {
-        switch(a) {
-            case '\b':
-                if(buffer.length - 1 < 0) return false;
-                buffer = buffer.substr(0, buffer.length - 1);
-                break;
-            case '\n':
-                printf("\b\n")
-                if(buffer.length > 0)
-                    execute_command(buffer);
-                else {
-                    reprompt();
-                }
-                return false;
-            default:
-                buffer += a;
-        }
-        return true;
+    if(!init) {
+        env = envp;
+    
+        paths = get_variable_value("PATH", env).split(":");
+    
+        printf(version_string+"\n")
+        reprompt();
+        init = true;
     }
-}
-function read_input() {
+    if(command_queue.length !== 0) {
+        run_queue();
+        return;
+    }
     if(executed) {
         buffer = "";
         reprompt();
@@ -45,20 +28,51 @@ function read_input() {
     }
     let b = read(0);
     if(b.length > 0) {
-        if(add_to_buffer(b))
-            printf('\b' + read(0) + cursor_char);
+        add_to_buffer(b)
+        run_queue();
     }
+}
+
+function add_to_buffer(b) {
+    printf('\b'); // Clear old cursor
+    let command_ran = false;
+    for(let i = 0; i < b.length; i++) {
+        let a = b[i]; // Char
+
+        switch(a) {
+            case '\b':
+                if(buffer.length - 1 < 0)
+                    break;
+                buffer = buffer.substring(0, buffer.length - 1);
+                printf('\b')
+                break;
+            case '\n':
+                printf('\n')
+                command_ran = true;
+                if(buffer.length > 0) {
+                    parse_input(buffer);
+                    break;
+                }
+                else
+                    reprompt();
+                break;
+            default:
+                printf(a)
+                buffer += a;
+                break;
+        }
+    }
+    if(!command_ran)
+        printf(cursor_char); // Add new cursor
 }
 function reprompt() {
     buffer = "";
     printf(prompt + " " + cursor_char);
 }
 function find_path(command) {
-    for(let path of paths) {
-        if(listdir(opendir(path)).indexOf(command) !== -1) {
+    for(let path of paths)
+        if(listdir(opendir(path)).indexOf(command) !== -1)
             return path;
-        }
-    }
     return "";
 }
 let internal_commands = [
@@ -73,13 +87,78 @@ let internal_commands = [
     }],
     ["pwd", () => {
         printf(getcwd() + "\n");
+    }],
+    ["echo", (args) => {
+        printf(args + "\n");
     }]
 ]
-function execute_command() {
-    let command = buffer.split(" ")[0];
-    let separator_index = buffer.indexOf(" ");
-    let args = buffer.substring(separator_index + 1, buffer.length);
-    if(args.length === buffer.length) args = "";
+function run_script(string) {
+    let commands = string.split("\n");
+    for(let c of commands)
+        parse_input(c);
+}
+function parse_input(buffer) {
+    let token = "";
+    let command = "";
+    let add_to_queue = (conditional) => {
+        if(token.length > 0) {
+            if(command.length === 0)
+                queue(token, "", conditional);
+            else
+                queue(command, token, conditional);
+        }
+        command = "";
+        token = "";
+    }
+    for(let i = 0; i < buffer.length; i++) {
+        let c = buffer[i];
+        switch(c) {
+            case "&":
+                if(buffer[i+1] === "&")
+                    add_to_queue(true);
+                break;
+            case '#':
+                add_to_queue(false);
+                return
+            case ';':
+                add_to_queue(false);
+                break;
+            case ' ':
+                if(buffer[i+1] === " ")
+                    break;
+                if(command.length === 0 && token.length !== 0) {
+                    command = token;
+                    token = "";
+                    break;
+                }
+                if(token.length === 0)
+                    break;
+            default:
+                token+=c;
+                break;
+        }
+    }
+    if(token.length > 0 || command.length > 0)
+        add_to_queue(false);
+}
+let command_queue = [];
+function queue(command, args, conditional) {
+    command_queue.push([command, args, conditional]);
+}
+function run_queue() {
+    if(command_queue.length !== 0) {
+        let cmd = command_queue[0];
+        if(cmd[2]) {
+            if(condition_met)
+                condition_met = execute_command(cmd[0], cmd[1]) ? false : true;
+        } else
+            condition_met = execute_command(cmd[0], cmd[1]) ? false : true;
+        command_queue.splice(0, 1);
+        if(command_queue.length !== 0)
+            sleep(1)
+    }
+}
+function execute_command(command, args) {
     executed = true;
 
     let callback = internal_commands.find(a => {
@@ -97,7 +176,14 @@ function execute_command() {
         let cmdline = find_path(command) + "/" + command;
         if(!access(cmdline)) {
             fprintf(stderr, "Command "+command+" not found\n");
-            return;
+            return 1;
+        }
+        let fd = fopen(cmdline, "r");
+        let data = read(fd);
+        fclose(fd);
+        if(typeof data === "string") {
+            run_script(data);
+            return 0;
         }
         try {
             fork(() => {
@@ -107,6 +193,7 @@ function execute_command() {
         } catch (e) {
             if(!is_interrupt(e))
                 fprintf(stderr, "sh: " + e + "\n");
+            return 1;
         }
     }
 }

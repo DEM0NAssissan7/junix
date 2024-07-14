@@ -1,0 +1,34 @@
+/* JUNIX top: performance monitor
+
+Obviously, the top in this OS will work differently than one in an actual OS
+It is measuring different things, such as the general clock of system (where FIFO takes place)
+
+Processes are judged on percentage based on how often they run
+The kernel needs to provide programs with a way to access this stuff.
+
+*/
+let kernel_speed;
+this.main = function() {
+    read_inputs();
+    kernel_speed = get_kernel_speed();
+    draw_screen();
+}
+
+let time = get_time(2);
+function get_kernel_speed() {
+    let old_time = time;
+    time = get_time(2);
+    return time - old_time;
+}
+
+function draw_screen() {
+    printf("\?"); // Clear screen
+    printf("Kernel speed: " + kernel_speed);
+}
+
+function read_inputs() {
+    if(read(0) === "Escape") {
+        printf("\?");
+        exit();
+    }
+}

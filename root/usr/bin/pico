@@ -6,22 +6,33 @@ let filetype;
 this.main = function(args) {
     filename = get_filename(args);
     dir = dirname(args);
-    let fd = fopen(args, "r");
+    let fd = fopen(args, "w");
     buffer = read(fd);
     filetype = typeof buffer;
-    if(filetype !== "string")
-        buffer = buffer.toString();
+    if(filetype !== "string") {
+        switch(filetype) {
+            case "function":
+                buffer = buffer.toString();
+                break;
+            case "object":
+                buffer = JSON.stringify(buffer);
+                break;
+        }
+    }
     fclose(fd);
     
     draw_screen();
     thread(read_input);
-    sleep(-1)
+    sleep(-1);
 }
 
 function write_changes() {
     let fd = fopen(dir, "w");
     if(filetype === "function") {
         buffer = (new Function("return " + buffer))();
+    }
+    if(filetype === 'object') {
+        buffer = JSON.parse(buffer);
     }
     write(fd, buffer);
     fclose(fd);

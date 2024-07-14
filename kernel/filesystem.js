@@ -14,16 +14,15 @@ class Inode {
         return this.data;
     }
     mount(index) {
+        if(this.mountpoint !== false) throw new Error("Cannot mount inode: already mounted.");
         this.mountpoint = index;
     }
     umount() {
         this.mountpoint = false;
     }
     write(data) {
-        if(this.type === "-") {
+        if(this.type === "-")
             this.data = data;
-        } else
-            throw new Error("Cannot write data to a non-normal file.");
     }
     append(data) {
         if(this.type === "-") {
@@ -52,6 +51,8 @@ class JFS {
         if(options) {
             this.casefold = options.casefold ?? true;
         }
+        this.magic = 20;
+        this.uuid = random(0, 8196);
     }
     create_file(parent_index, path, data, type, user, mode) {
         let parent_inode = this.get_inode(parent_index);
@@ -66,8 +67,10 @@ class JFS {
         return inode;
     }
     mount(index, inode) {
+        if(this.mountpoint !== false) throw new Error("Cannot mount filesystem: already mounted");
         this.mountpoint = index;
         this.parent_inode = inode;
+        this.root.mountpoint = index;
     }
     stringify() {
         return "";

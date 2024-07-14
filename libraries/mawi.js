@@ -178,5 +178,10 @@ function get_variable_value(identifier, deftable) {
     return NaN;
 }
 function map_options(args) {
-    
+
+}
+
+function random(min, max, accuracy) {
+    let digits = Math.pow(10, accuracy ?? 0);
+    return Math.floor(((Math.random() * max) * digits) / digits) + min
 }

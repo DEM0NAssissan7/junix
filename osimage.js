@@ -179,7 +179,12 @@ function get_variable_value(identifier, deftable) {
     return NaN;
 }
 function map_options(args) {
-    
+
+}
+
+function random(min, max, accuracy) {
+    let digits = Math.pow(10, accuracy ?? 0);
+    return Math.floor(((Math.random() * max) * digits) / digits) + min
 }
 /* libraries/stdlib.js */
 const stdin = 0;
@@ -214,16 +219,15 @@ class Inode {
         return this.data;
     }
     mount(index) {
+        if(this.mountpoint !== false) throw new Error("Cannot mount inode: already mounted.");
         this.mountpoint = index;
     }
     umount() {
         this.mountpoint = false;
     }
     write(data) {
-        if(this.type === "-") {
+        if(this.type === "-")
             this.data = data;
-        } else
-            throw new Error("Cannot write data to a non-normal file.");
     }
     append(data) {
         if(this.type === "-") {
@@ -252,6 +256,8 @@ class JFS {
         if(options) {
             this.casefold = options.casefold ?? true;
         }
+        this.magic = 20;
+        this.uuid = random(0, 8196);
     }
     create_file(parent_index, path, data, type, user, mode) {
         let parent_inode = this.get_inode(parent_index);
@@ -266,8 +272,10 @@ class JFS {
         return inode;
     }
     mount(index, inode) {
+        if(this.mountpoint !== false) throw new Error("Cannot mount filesystem: already mounted");
         this.mountpoint = index;
         this.parent_inode = inode;
+        this.root.mountpoint = index;
     }
     stringify() {
         return "";
@@ -286,30 +294,62 @@ let mkfile = function(path, data) {
     else if(!data)
         initfs_table.push([path]);
 }
+mkfile('/home');
 mkfile('/usr');
-mkfile('/usr/local');
-mkfile('/usr/local/bin');
 mkfile('/usr/bin');
-mkfile('/usr/bin/ls',function(){
-this.main = function(args) {
-    let fd;
-    if(args.length === 0)
-        fd = opendir(getcwd());
-    else
-        fd = opendir(args);
-    let items = listdir(fd);
-    for(let item of items) {
-        printf(item + "  ");
+mkfile('/usr/bin/top',function(){
+/* JUNIX top: performance monitor
+
+Obviously, the top in this OS will work differently than one in an actual OS
+It is measuring different things, such as the general clock of system (where FIFO takes place)
+
+Processes are judged on percentage based on how often they run
+The kernel needs to provide programs with a way to access this stuff.
+
+*/
+let kernel_speed;
+this.main = function() {
+    read_inputs();
+    kernel_speed = get_kernel_speed();
+    draw_screen();
+}
+
+let time = get_time(2);
+function get_kernel_speed() {
+    let old_time = time;
+    time = get_time(2);
+    return time - old_time;
+}
+
+function draw_screen() {
+    printf("\?"); // Clear screen
+    printf("Kernel speed: " + kernel_speed);
+}
+
+function read_inputs() {
+    if(read(0) === "Escape") {
+        printf("\?");
+        exit();
     }
-    printf('\n')
+}
+});
+mkfile('/usr/bin/cat',function(){
+this.main = function(args) {
+    let fd = fopen(args, "r");
+    let data = read(fd);
+    if(typeof data === "string" || typeof data === "function")
+        printf(data + '\n');
+    else
+        printf(JSON.stringify(data) + "\n");
+    fclose(fd);
     exit();
 }
 });
-mkfile('/usr/bin/mklclstr',function(){
-// Make local storage
-
+mkfile('/usr/bin/js',function(){
 this.main = function(args) {
-    
+    let fd = fopen(args, "r");
+    (function(){(read(fd))();})()
+    exit();
 }
 });
 mkfile('/usr/bin/pico',function(){
@@ -321,22 +361,33 @@ let filetype;
 this.main = function(args) {
     filename = get_filename(args);
     dir = dirname(args);
-    let fd = fopen(args, "r");
+    let fd = fopen(args, "w");
     buffer = read(fd);
     filetype = typeof buffer;
-    if(filetype !== "string")
-        buffer = buffer.toString();
+    if(filetype !== "string") {
+        switch(filetype) {
+            case "function":
+                buffer = buffer.toString();
+                break;
+            case "object":
+                buffer = JSON.stringify(buffer);
+                break;
+        }
+    }
     fclose(fd);
     
     draw_screen();
     thread(read_input);
-    sleep(-1)
+    sleep(-1);
 }
 
 function write_changes() {
     let fd = fopen(dir, "w");
     if(filetype === "function") {
         buffer = (new Function("return " + buffer))();
+    }
+    if(filetype === 'object') {
+        buffer = JSON.parse(buffer);
     }
     write(fd, buffer);
     fclose(fd);
@@ -405,37 +456,30 @@ function del_char(buff, index) {
     return buf1 + buf2;
 }
 });
-mkfile('/usr/bin/cat',function(){
-this.main = function(args) {
-    let fd = fopen(args, "r");
-    printf(read(fd) + '\n');
-    fclose(fd);
-    exit();
-}
-});
-mkfile('/usr/bin/js',function(){
-this.main = function(args) {
-    let fd = fopen(args, "r");
-    (function(){(read(fd))();})()
-    exit();
-}
-});
-mkfile('/home');
-mkfile('/var');
-mkfile('/var/modalias',function(){
+mkfile('/usr/bin/mklclstr',function(){
+// Make local storage
 
+this.main = function(args) {
+    
+}
 });
-mkfile('/etc');
-mkfile('/etc/fstab',`/dev/disk0 /home`);
-mkfile('/etc/services',`/service/disk
-/service/mount
-/service/keyboard
-/service/console`);
-mkfile('/etc/rc',`/bin/sh`);
-mkfile('/etc/login.conf',`PATH=/bin:/usr/bin:/usr/local/bin`);
-mkfile('/etc/os-release',`NAME=JUNIX
-MAJOR_VERSION=1
-MINOR_VERSION=1.0 Alpha`);
+mkfile('/usr/bin/ls',function(){
+this.main = function(args) {
+    let fd;
+    if(args.length === 0)
+        fd = opendir(getcwd());
+    else
+        fd = opendir(args);
+    let items = listdir(fd);
+    for(let item of items) {
+        printf(item + "  ");
+    }
+    printf('\n')
+    exit();
+}
+});
+mkfile('/usr/local');
+mkfile('/usr/local/bin');
 mkfile('/boot');
 mkfile('/boot/kernel',function(){
 /* JUNIX Kernel: The heart of the operating system
@@ -615,6 +659,17 @@ let errno;
     let mount_table = [];
     let mount_fs = function(filesystem, path) {
         let file = get_file(path);
+        if(file.incomplete) throw new Error("Cannot mount at " + path + ": directory does not exist");
+        if(file.inode.type !== "d") throw new Error("Cannot mount at " + path + ": not a directory");
+        if(typeof filesystem !== "object") throw new Error("Cannot mount filesystem: not an object");
+        if(filesystem.magic !== 20) throw new Error("Mount failed: not a filesystem");
+        // Check if the filesystem already exists in the mount table
+        for(let fs of mount_table) {
+            if(!fs) continue;
+            if(fs.uuid === filesystem.uuid)
+                throw new Error("Mount failed: Filesystem already exists in mount table.");
+        }
+
         file.inode.mount(mount_table.length);
         filesystem.mount(mount_table.length, file.inode);
         mount_table.push(filesystem);
@@ -626,18 +681,28 @@ let errno;
         mount_fs(fs, path);
         kdebug("Device " + full_path(device) + " mounted at " + full_path(path));
     }
+    let unmount_fs = function(filesystem) {
+        if(!filesystem || typeof filesystem !== "object") throw new Error("Filesystem invalid");
+        if(filesystem.mountpoint === false) throw new Error("Cannot unmount filesystem: not mounted");
+        let inode = filesystem.parent_inode;
+
+        if(inode.mountpoint === false) throw new Error("Cannot unmount filesystem: ");
+        mount_table[filesystem.mountpoint] = undefined;
+        inode.mountpoint = false;
+        filesystem.mountpoint = false;
+        filesystem.root.mountpoint = false;
+    }
     function umount(path) {
         let file = get_file(path);
         if(file.incomplete) throw new Error("File does not exist at " + path);
-        let inode = file.inode;
-        if(file.type === "m") {
-            mount_table[inode.mountpoint] = null
-            inode.get_data().parent_inode.umount();
+        let filesystem;
+        if(file.inode.type === "d") {
+            console.log(file.inode.mountpoint, file.inode.path)
+            filesystem = mount_table[file.inode.mountpoint];
         }
-        if(file.type === "d") {
-            mount_table[inode.mountpoint] = null
-            inode.get_data().umount();
-        }
+        else if(typeof file.inode.get_data() === "object")
+            filesystem = file.inode.get_data();
+        unmount_fs(filesystem);
         return 0;
     }
 
@@ -720,6 +785,11 @@ let errno;
             if(time >= this.last_exec + this.sleep)
                 return true;
             return false;
+        }
+        slept(time) {
+            if(this.sleep === 0)
+                return false;
+            return this.is_ready(time);
         }
         run() {
             this.exec(...this.args);
@@ -898,6 +968,7 @@ let errno;
         if(!c_process) panic("wait() was run outside of kernel context");
         if(c_process.children.length !== 0)
             c_process.waiting = true;
+        interrupt();
     }
     function exec(path, ...args) {
         let file = get_file(path);
@@ -981,7 +1052,7 @@ let errno;
                     if(!is_interrupt(e)) {
                         console.error(thread.process.cmdline + " (" + thread.process.pid + ") encountered an error (thread: " + thread.pid + ")");
                         console.error(e);
-                        fprintf(stderr, thread.process.cmdline + " encountered an error: " + e + "\n");
+                        fprintf(stderr, thread.process.command + ": " + e.message + "\n");
                         c_process.kill();
                     }
                 }
@@ -992,6 +1063,36 @@ let errno;
         c_process = null;
         c_user = null;
         c_thread = null;
+    }
+
+    // Power manager: take advantage of dynamic kernel clocking
+    let loop_timeout = 10;
+    let dynamic_clock = function() {
+        loop_timeout = 100;
+        let earliest_exec_time = Infinity;
+        let time = get_time(3);
+        for(let process of processes) {
+            if(process.is_available()) {
+                for(let thread of process.threads) {
+                    if(thread.slept(time)) {
+                        kernel_main();
+                        kdebug("Scheduler was early");
+                    }
+                    if(thread.sleep < earliest_exec_time && thread.sleep > 0)
+                        earliest_exec_time = thread.sleep;
+                }
+            }
+        }
+        if(earliest_exec_time !== Infinity)
+            loop_timeout = earliest_exec_time
+    }
+
+    // Debug
+    const debug = true;
+    if(debug) {
+        function k_eval(string) {
+            return eval(string);
+        }
     }
 
     // tmpfs
@@ -1011,9 +1112,19 @@ let errno;
     mount_root(new JFS());
     
     /* Kernel-level device management */
-    let devfs = new JFS();
+    let devfs;
+    let create_device_pointer = function(device, name) {
+        devfs.create_file(0, "/dev/"+name, device, "-", 0, 511);
+    }
+    let create_devfs = function() {
+        devfs = new JFS();
+        mount_fs(devfs, "/dev");
+        devfs.create_file
+        create_device_pointer(devfs, "devfs");
+    }
     mkdir("/dev");
-    mount_fs(devfs, "/dev");
+    create_devfs();
+    create_device_pointer(root_fs, "disk0");
 
     // Disk drivers
 
@@ -1041,7 +1152,7 @@ let errno;
     window.root_fs = root_fs;
 
     // Init process
-    {
+    function create_init(){
         kdebug("Creating init");
         let init_code = new function() {
             this.main = function() {
@@ -1051,73 +1162,388 @@ let errno;
         }
         processes.push(new Process(init_code, 0, "/"));
     }
+    create_init();
+
+    // System management
+    let reset = function() {
+        processes[0].kill(); // Kill all processes
+        processes = [];
+        threads = [];
+        pids = 1;
+        loop_timeout = 10;
+    }
+    function reboot(op) {
+        switch(op) {
+            case 2: // Change to be accurate to actual UNIX
+                kdebug("Soft rebooting system (without unmounting)");
+                reset();
+                create_init();
+                break;
+            default:
+                kdebug("Soft rebooting system...");
+                reset();
+                for(let fs of mount_table)
+                    if(fs && typeof fs === "object")
+                        unmount_fs(fs);
+                create_devfs();
+                create_init();
+                break;
+        }
+    }
 
     // Execution loop
     kdebug("Beginning execution loop");
-    interval = setInterval(() => {
+    let kernel_main = () => {
         try {
             scheduler();
+            dynamic_clock();
         } catch (e) {
             panic("Critical error in kernel.");
             console.error(e);
         }
-    }, 10);
+    }
+    let kernel_loop = () => {
+        kernel_main();
+        setTimeout(kernel_loop, loop_timeout);
+    }
+    kernel_loop(); // Start execution
 }
 });
-mkfile('/service');
-mkfile('/service/serial',function(){
-this.main = function() {
+mkfile('/bin');
+mkfile('/bin/init',function(){
+// JUNIX Init system: inspired by FreeBSD rc
+let fd;
+let pid;
+this.main = () => {
+    if(getpid() !== 1) {
+        fprintf(stderr, "init can only run on PID 1\n");
+        exit();
+    }
 
+    fd = fopen("/etc/services", "r");
+    let paths = read(fd).split("\n");
+    for(let path of paths)
+        start(path);
+    fclose(fd);
+    fclose(stdio);
+    fclose(stdin);
+    fclose(stderr);
+
+    pid = thread(post_driver);
+    sleep(-1);
+}
+let wait = false;
+function post_driver() {
+    if(!wait) { // Allow the drivers to initialize before starting /etc/rc
+        wait = true;
+        return;
+    }
+    // Create stdin, stdio, and stderr
+    fopen("/dev/keyboard", "r"); // Stdin
+    fopen("/dev/console", "a"); // Stdio
+    dup(stdio); // Stderr
+
+    fd = fopen("/etc/os-release", "r")
+    let deftable = map_variables(read(fd));
+    printf(get_variable_value("NAME", deftable) + " " +
+            get_variable_value("MAJOR_VERSION", deftable) +
+            " [" + get_variable_value("MINOR_VERSION", deftable) + "]\n\n");
+    fclose(fd);
+
+    printf("Starting /etc/rc\n");
+    fd = fopen("/etc/rc", "r");
+    paths = read(fd).split("\n");
+    for(let path of paths)
+        start(path);
+    printf("\n\n");
+
+    cancel(pid);
+}
+function start (path) {
+    printf("Starting " + path)
+    console.log("starting " + path)
+    fork(() => {
+        fclose(fd);
+        let _fd = fopen("/etc/login.conf", "r");
+        exec(path, "", map_variables(read(_fd)));
+        fclose(_fd);
+        printf(" [" + getpid() + "]\n");
+    });
 }
 });
-mkfile('/service/mount',function(){
-this.main = function() {
-    // Mount permanent storage
-    mount("/dev/disk0", "/home");
+mkfile('/bin/modload',function(){
+// This program is responsible for detecting and initializing drivers for all hardware attached at all times
+
+this.main() = () => {
+}
+});
+mkfile('/bin/nigga',`echo Hello World!
+echo I am about to bust nigga
+echo NIGGER;echo HINDI`);
+mkfile('/bin/umount',function(){
+this.main = function(args) {
+    umount(args);
     exit();
 }
 });
-mkfile('/service/keyboard',function(){
-let fd;
-let keys = "";
-
-function keyupdate() {
-    write(fd, keys);
-    keys = "";
+mkfile('/bin/kill',function(){
+this.main = function(args) {
+    let name_map = args.split(" ");
+    let pid = parseInt(name_map[0]);
+    let signal = parseInt(name_map[1] ?? 9);
+    kill(pid, signal);
+    exit();
 }
-this.main = function() {
-    fd = fopen("/dev/keyboard", "w", 777);
-    thread(keyupdate, []);
-    sleep(-1);
+});
+mkfile('/bin/sh',function(){
+let buffer = "";
+const prompt = "#";
+const cursor_char = "_";
+let paths = [];
+let env;
+let executed = false;
+const version_string = "sh 1.0"
+let init = false;
+let condition_met = true;
+this.main = function(args, envp) {
+    if(!init) {
+        env = envp;
+    
+        paths = get_variable_value("PATH", env).split(":");
+    
+        printf(version_string+"\n")
+        reprompt();
+        init = true;
+    }
+    if(command_queue.length !== 0) {
+        run_queue();
+        return;
+    }
+    if(executed) {
+        buffer = "";
+        reprompt();
+        executed = false;
+    }
+    let b = read(0);
+    if(b.length > 0) {
+        add_to_buffer(b)
+        run_queue();
+    }
 }
 
-const key_replacements = [
-    ["Backspace", '\b'],
-    [' ', ' '],
-    ["Shift", ''],
-    ["Enter", '\n'],
-    ["Meta", ''],
-    ["Control", '\c']
+function add_to_buffer(b) {
+    printf('\b'); // Clear old cursor
+    let command_ran = false;
+    for(let i = 0; i < b.length; i++) {
+        let a = b[i]; // Char
+
+        switch(a) {
+            case '\b':
+                if(buffer.length - 1 < 0)
+                    break;
+                buffer = buffer.substring(0, buffer.length - 1);
+                printf('\b')
+                break;
+            case '\n':
+                printf('\n')
+                command_ran = true;
+                if(buffer.length > 0) {
+                    parse_input(buffer);
+                    break;
+                }
+                else
+                    reprompt();
+                break;
+            default:
+                printf(a)
+                buffer += a;
+                break;
+        }
+    }
+    if(!command_ran)
+        printf(cursor_char); // Add new cursor
+}
+function reprompt() {
+    buffer = "";
+    printf(prompt + " " + cursor_char);
+}
+function find_path(command) {
+    for(let path of paths)
+        if(listdir(opendir(path)).indexOf(command) !== -1)
+            return path;
+    return "";
+}
+let internal_commands = [
+    ["exit", (args) => {
+        exit();
+    }],
+    ["clear", () => {
+        printf('\?');
+    }],
+    ["cd", (args) => {
+        chdir(args);
+    }],
+    ["pwd", () => {
+        printf(getcwd() + "\n");
+    }],
+    ["echo", (args) => {
+        printf(args + "\n");
+    }]
 ]
-
-function replace_keys(key) {
-    for(let r of key_replacements)
-        if(r[0] === key)
-            return r[1];
-    return key;
+function run_script(string) {
+    let commands = string.split("\n");
+    for(let c of commands)
+        parse_input(c);
 }
+function parse_input(buffer) {
+    let token = "";
+    let command = "";
+    let add_to_queue = (conditional) => {
+        if(token.length > 0) {
+            if(command.length === 0)
+                queue(token, "", conditional);
+            else
+                queue(command, token, conditional);
+        }
+        command = "";
+        token = "";
+    }
+    for(let i = 0; i < buffer.length; i++) {
+        let c = buffer[i];
+        switch(c) {
+            case "&":
+                if(buffer[i+1] === "&")
+                    add_to_queue(true);
+                break;
+            case '#':
+                add_to_queue(false);
+                return
+            case ';':
+                add_to_queue(false);
+                break;
+            case ' ':
+                if(buffer[i+1] === " ")
+                    break;
+                if(command.length === 0 && token.length !== 0) {
+                    command = token;
+                    token = "";
+                    break;
+                }
+                if(token.length === 0)
+                    break;
+            default:
+                token+=c;
+                break;
+        }
+    }
+    if(token.length > 0 || command.length > 0)
+        add_to_queue(false);
+}
+let command_queue = [];
+function queue(command, args, conditional) {
+    command_queue.push([command, args, conditional]);
+}
+function run_queue() {
+    if(command_queue.length !== 0) {
+        let cmd = command_queue[0];
+        if(cmd[2]) {
+            if(condition_met)
+                condition_met = execute_command(cmd[0], cmd[1]) ? false : true;
+        } else
+            condition_met = execute_command(cmd[0], cmd[1]) ? false : true;
+        command_queue.splice(0, 1);
+        if(command_queue.length !== 0)
+            sleep(1)
+    }
+}
+function execute_command(command, args) {
+    executed = true;
 
-document.addEventListener("keydown", (e) => {
-    keys += replace_keys(e.key);
-    e.preventDefault();
+    let callback = internal_commands.find(a => {
+        if (a[0] === command)
+            return true;
+    });
+    if(callback) {
+        try {
+            callback[1](args);
+        } catch (e) {
+            if(!is_interrupt(e))
+                fprintf(stderr, "sh: "+e+"\n")
+        }
+    } else {
+        let cmdline = find_path(command) + "/" + command;
+        if(!access(cmdline)) {
+            fprintf(stderr, "Command "+command+" not found\n");
+            return 1;
+        }
+        let fd = fopen(cmdline, "r");
+        let data = read(fd);
+        fclose(fd);
+        if(typeof data === "string") {
+            run_script(data);
+            return 0;
+        }
+        try {
+            fork(() => {
+                exec(cmdline, args, env);
+            });
+            wait();
+        } catch (e) {
+            if(!is_interrupt(e))
+                fprintf(stderr, "sh: " + e + "\n");
+            return 1;
+        }
+    }
+}
 });
+mkfile('/bin/mkdir',function(){
+this.main = function(args) {
+    console.log(args);
+    mkdir(args);
+    exit();
+}
+});
+mkfile('/bin/mount',function(){
+this.main = function(args) {
+    let args_map = args.split(" ");
+    let device = args_map[0];
+    let mountpoint = args_map[1];
+    mount(device, mountpoint);
+    exit();
+}
+});
+mkfile('/sbin');
+mkfile('/sbin/reboot',function(){
+this.main = function(args) {
+    printf("Rebooting system...\n")
+    reboot(parseInt(args));
+}
+});
+mkfile('/etc');
+mkfile('/etc/fstab',`/dev/disk0 /home`);
+mkfile('/etc/os-release',`NAME=JUNIX
+MAJOR_VERSION=1
+MINOR_VERSION=1.0 Alpha`);
+mkfile('/etc/rc',`/bin/sh`);
+mkfile('/etc/login.conf',`PATH=/bin:/usr/bin:/usr/local/bin:/sbin`);
+mkfile('/etc/services',`/service/disk
+/service/mount
+/service/keyboard
+/service/console`);
+mkfile('/var');
+mkfile('/var/modalias',function(){
 
-document.addEventListener("keyup", (e) => {
-    keys = keys.replaceAll(replace_keys(e.key), "");
 });
+mkfile('/service');
+mkfile('/service/mount',function(){
+this.main = function() {
+    // Mount permanent storage
+    mount("/dev/disk1", "/home");
+    exit();
+}
 });
 mkfile('/service/disk',function(){
-let disks = 0;
+let disks = 1;
 let fd;
 this.main = function() {
     try {
@@ -1160,12 +1586,61 @@ function call_watcher() {
         }
     }
     write(fd, "");
-    sleep(10);
+}
+});
+mkfile('/service/keyboard',function(){
+let fd;
+let keys = "";
+
+function keyupdate() {
+    write(fd, keys);
+    keys = "";
+}
+this.main = function() {
+    fd = fopen("/dev/keyboard", "w", 777);
+    thread(keyupdate, []);
+    sleep(-1);
+}
+
+const key_replacements = [
+    ["Backspace", '\b'],
+    [' ', ' '],
+    ["Shift", ''],
+    ["Enter", '\n'],
+    ["Meta", ''],
+    ["Control", '\c']
+]
+
+function replace_keys(key) {
+    for(let r of key_replacements)
+        if(r[0] === key)
+            return r[1];
+    return key;
+}
+
+document.addEventListener("keydown", (e) => {
+    keys += replace_keys(e.key);
+    e.preventDefault();
+});
+
+document.addEventListener("keyup", (e) => {
+    keys = keys.replaceAll(replace_keys(e.key), "");
+});
+});
+mkfile('/service/serial',function(){
+this.main = function() {
+
 }
 });
 mkfile('/service/console',function(){
 let fd, element;
-let update_display = function() {
+let init = false;
+this.main = function() {
+    if(!init) {
+        element = document.getElementById("console");
+        fd = fopen("/dev/console", "w");
+        init = true;
+    }
     let string = read(fd);
     let buff = element.innerText;
     let char;
@@ -1186,207 +1661,7 @@ let update_display = function() {
     if(string.length > 0)
         element.innerText = buff
     write(fd, "");
-    sleep(30);
-}
-this.main = function() {
-    element = document.getElementById("console");
-    fd = fopen("/dev/console", "w");
-    sleep(-1);
-    thread(update_display, []);
-}
-});
-mkfile('/bin');
-mkfile('/bin/modload',function(){
-// This program is responsible for detecting and initializing drivers for all hardware attached at all times
-
-this.main() = () => {
-}
-});
-mkfile('/bin/mkdir',function(){
-this.main = function(args) {
-    console.log(args);
-    mkdir(args);
-    exit();
-}
-});
-mkfile('/bin/init',function(){
-// JUNIX Init system: inspired by FreeBSD rc
-let fd;
-let pid;
-this.main = () => {
-    if(getpid() !== 1) {
-        fprintf(stderr, "init can only run on PID 1\n");
-        exit();
-    }
-
-    fd = fopen("/etc/services", "r");
-    let paths = read(fd).split("\n");
-    for(let path of paths)
-        start(path);
-    fclose(fd);
-    fclose(stdio);
-    fclose(stdin);
-    fclose(stderr);
-
-    pid = thread(post_driver);
-    sleep(-1);
-}
-let wait = false;
-function post_driver() {
-    if(!wait) {
-        wait = true;
-        return;
-    }
-    // Create stdin, stdio, and stderr
-    fopen("/dev/keyboard", "r"); // Stdin
-    fopen("/dev/console", "a"); // Stdio
-    dup(stdio); // Stderr
-
-    fd = fopen("/etc/os-release", "r")
-    let deftable = map_variables(read(fd));
-    printf(get_variable_value("NAME", deftable) + " " +
-            get_variable_value("MAJOR_VERSION", deftable) +
-            " [" + get_variable_value("MINOR_VERSION", deftable) + "]\n\n");
-    fclose(fd);
-
-    printf("Starting /etc/rc\n");
-    fd = fopen("/etc/rc", "r");
-    paths = read(fd).split("\n");
-    for(let path of paths)
-        start(path);
-    printf("\n\n");
-
-    cancel(pid);
-}
-function start (path) {
-    printf("Starting " + path)
-    console.log("starting " + path)
-    fork(() => {
-        fclose(fd);
-        let _fd = fopen("/etc/login.conf", "r");
-        exec(path, "", map_variables(read(_fd)));
-        fclose(_fd);
-        printf(" [" + getpid() + "]\n");
-    });
-}
-});
-mkfile('/bin/kill',function(){
-this.main = function(args) {
-    
-}
-});
-mkfile('/bin/sh',function(){
-let buffer = "";
-const prompt = "#";
-const cursor_char = "_";
-let paths = [];
-let env;
-let executed = false;
-const version_string = "sh 1.0"
-this.main = function(args, envp) {
-    env = envp;
-
-    paths = get_variable_value("PATH", env).split(":");
-
-    printf(version_string+"\n")
-    reprompt();
-    thread(read_input, []);
-    sleep(-1);
-}
-
-function add_to_buffer(b) {
-    for(let a of b) {
-        switch(a) {
-            case '\b':
-                if(buffer.length - 1 < 0) return false;
-                buffer = buffer.substr(0, buffer.length - 1);
-                break;
-            case '\n':
-                printf("\b\n")
-                if(buffer.length > 0)
-                    execute_command(buffer);
-                else {
-                    reprompt();
-                }
-                return false;
-            default:
-                buffer += a;
-        }
-        return true;
-    }
-}
-function read_input() {
-    if(executed) {
-        buffer = "";
-        reprompt();
-        executed = false;
-    }
-    let b = read(0);
-    if(b.length > 0) {
-        if(add_to_buffer(b))
-            printf('\b' + read(0) + cursor_char);
-    }
-}
-function reprompt() {
-    buffer = "";
-    printf(prompt + " " + cursor_char);
-}
-function find_path(command) {
-    for(let path of paths) {
-        if(listdir(opendir(path)).indexOf(command) !== -1) {
-            return path;
-        }
-    }
-    return "";
-}
-let internal_commands = [
-    ["exit", (args) => {
-        exit();
-    }],
-    ["clear", () => {
-        printf('\?');
-    }],
-    ["cd", (args) => {
-        chdir(args);
-    }],
-    ["pwd", () => {
-        printf(getcwd() + "\n");
-    }]
-]
-function execute_command() {
-    let command = buffer.split(" ")[0];
-    let separator_index = buffer.indexOf(" ");
-    let args = buffer.substring(separator_index + 1, buffer.length);
-    if(args.length === buffer.length) args = "";
-    executed = true;
-
-    let callback = internal_commands.find(a => {
-        if (a[0] === command)
-            return true;
-    });
-    if(callback) {
-        try {
-            callback[1](args);
-        } catch (e) {
-            if(!is_interrupt(e))
-                fprintf(stderr, "sh: "+e+"\n")
-        }
-    } else {
-        let cmdline = find_path(command) + "/" + command;
-        if(!access(cmdline)) {
-            fprintf(stderr, "Command "+command+" not found\n");
-            return;
-        }
-        try {
-            fork(() => {
-                exec(cmdline, args, env);
-            });
-            wait();
-        } catch (e) {
-            if(!is_interrupt(e))
-                fprintf(stderr, "sh: " + e + "\n");
-        }
-    }
+    sleep(30)
 }
 });
 /* boot.js */
@@ -1571,6 +1846,17 @@ let errno;
     let mount_table = [];
     let mount_fs = function(filesystem, path) {
         let file = get_file(path);
+        if(file.incomplete) throw new Error("Cannot mount at " + path + ": directory does not exist");
+        if(file.inode.type !== "d") throw new Error("Cannot mount at " + path + ": not a directory");
+        if(typeof filesystem !== "object") throw new Error("Cannot mount filesystem: not an object");
+        if(filesystem.magic !== 20) throw new Error("Mount failed: not a filesystem");
+        // Check if the filesystem already exists in the mount table
+        for(let fs of mount_table) {
+            if(!fs) continue;
+            if(fs.uuid === filesystem.uuid)
+                throw new Error("Mount failed: Filesystem already exists in mount table.");
+        }
+
         file.inode.mount(mount_table.length);
         filesystem.mount(mount_table.length, file.inode);
         mount_table.push(filesystem);
@@ -1582,18 +1868,28 @@ let errno;
         mount_fs(fs, path);
         kdebug("Device " + full_path(device) + " mounted at " + full_path(path));
     }
+    let unmount_fs = function(filesystem) {
+        if(!filesystem || typeof filesystem !== "object") throw new Error("Filesystem invalid");
+        if(filesystem.mountpoint === false) throw new Error("Cannot unmount filesystem: not mounted");
+        let inode = filesystem.parent_inode;
+
+        if(inode.mountpoint === false) throw new Error("Cannot unmount filesystem: ");
+        mount_table[filesystem.mountpoint] = undefined;
+        inode.mountpoint = false;
+        filesystem.mountpoint = false;
+        filesystem.root.mountpoint = false;
+    }
     function umount(path) {
         let file = get_file(path);
         if(file.incomplete) throw new Error("File does not exist at " + path);
-        let inode = file.inode;
-        if(file.type === "m") {
-            mount_table[inode.mountpoint] = null
-            inode.get_data().parent_inode.umount();
+        let filesystem;
+        if(file.inode.type === "d") {
+            console.log(file.inode.mountpoint, file.inode.path)
+            filesystem = mount_table[file.inode.mountpoint];
         }
-        if(file.type === "d") {
-            mount_table[inode.mountpoint] = null
-            inode.get_data().umount();
-        }
+        else if(typeof file.inode.get_data() === "object")
+            filesystem = file.inode.get_data();
+        unmount_fs(filesystem);
         return 0;
     }
 
@@ -1676,6 +1972,11 @@ let errno;
             if(time >= this.last_exec + this.sleep)
                 return true;
             return false;
+        }
+        slept(time) {
+            if(this.sleep === 0)
+                return false;
+            return this.is_ready(time);
         }
         run() {
             this.exec(...this.args);
@@ -1854,6 +2155,7 @@ let errno;
         if(!c_process) panic("wait() was run outside of kernel context");
         if(c_process.children.length !== 0)
             c_process.waiting = true;
+        interrupt();
     }
     function exec(path, ...args) {
         let file = get_file(path);
@@ -1937,7 +2239,7 @@ let errno;
                     if(!is_interrupt(e)) {
                         console.error(thread.process.cmdline + " (" + thread.process.pid + ") encountered an error (thread: " + thread.pid + ")");
                         console.error(e);
-                        fprintf(stderr, thread.process.cmdline + " encountered an error: " + e + "\n");
+                        fprintf(stderr, thread.process.command + ": " + e.message + "\n");
                         c_process.kill();
                     }
                 }
@@ -1948,6 +2250,36 @@ let errno;
         c_process = null;
         c_user = null;
         c_thread = null;
+    }
+
+    // Power manager: take advantage of dynamic kernel clocking
+    let loop_timeout = 10;
+    let dynamic_clock = function() {
+        loop_timeout = 100;
+        let earliest_exec_time = Infinity;
+        let time = get_time(3);
+        for(let process of processes) {
+            if(process.is_available()) {
+                for(let thread of process.threads) {
+                    if(thread.slept(time)) {
+                        kernel_main();
+                        kdebug("Scheduler was early");
+                    }
+                    if(thread.sleep < earliest_exec_time && thread.sleep > 0)
+                        earliest_exec_time = thread.sleep;
+                }
+            }
+        }
+        if(earliest_exec_time !== Infinity)
+            loop_timeout = earliest_exec_time
+    }
+
+    // Debug
+    const debug = true;
+    if(debug) {
+        function k_eval(string) {
+            return eval(string);
+        }
     }
 
     // tmpfs
@@ -1967,9 +2299,19 @@ let errno;
     mount_root(new JFS());
     
     /* Kernel-level device management */
-    let devfs = new JFS();
+    let devfs;
+    let create_device_pointer = function(device, name) {
+        devfs.create_file(0, "/dev/"+name, device, "-", 0, 511);
+    }
+    let create_devfs = function() {
+        devfs = new JFS();
+        mount_fs(devfs, "/dev");
+        devfs.create_file
+        create_device_pointer(devfs, "devfs");
+    }
     mkdir("/dev");
-    mount_fs(devfs, "/dev");
+    create_devfs();
+    create_device_pointer(root_fs, "disk0");
 
     // Disk drivers
 
@@ -1997,7 +2339,7 @@ let errno;
     window.root_fs = root_fs;
 
     // Init process
-    {
+    function create_init(){
         kdebug("Creating init");
         let init_code = new function() {
             this.main = function() {
@@ -2007,15 +2349,49 @@ let errno;
         }
         processes.push(new Process(init_code, 0, "/"));
     }
+    create_init();
+
+    // System management
+    let reset = function() {
+        processes[0].kill(); // Kill all processes
+        processes = [];
+        threads = [];
+        pids = 1;
+        loop_timeout = 10;
+    }
+    function reboot(op) {
+        switch(op) {
+            case 2: // Change to be accurate to actual UNIX
+                kdebug("Soft rebooting system (without unmounting)");
+                reset();
+                create_init();
+                break;
+            default:
+                kdebug("Soft rebooting system...");
+                reset();
+                for(let fs of mount_table)
+                    if(fs && typeof fs === "object")
+                        unmount_fs(fs);
+                create_devfs();
+                create_init();
+                break;
+        }
+    }
 
     // Execution loop
     kdebug("Beginning execution loop");
-    interval = setInterval(() => {
+    let kernel_main = () => {
         try {
             scheduler();
+            dynamic_clock();
         } catch (e) {
             panic("Critical error in kernel.");
             console.error(e);
         }
-    }, 10);
+    }
+    let kernel_loop = () => {
+        kernel_main();
+        setTimeout(kernel_loop, loop_timeout);
+    }
+    kernel_loop(); // Start execution
 }

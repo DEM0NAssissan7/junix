@@ -1,0 +1,4 @@
+this.main = function(args) {
+    printf("Rebooting system...\n")
+    reboot(parseInt(args));
+}

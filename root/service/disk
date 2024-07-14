@@ -1,4 +1,4 @@
-let disks = 0;
+let disks = 1;
 let fd;
 this.main = function() {
     try {
@@ -41,5 +41,4 @@ function call_watcher() {
         }
     }
     write(fd, "");
-    sleep(10);
 }

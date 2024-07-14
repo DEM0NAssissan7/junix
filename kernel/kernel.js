@@ -175,6 +175,17 @@ let errno;
     let mount_table = [];
     let mount_fs = function(filesystem, path) {
         let file = get_file(path);
+        if(file.incomplete) throw new Error("Cannot mount at " + path + ": directory does not exist");
+        if(file.inode.type !== "d") throw new Error("Cannot mount at " + path + ": not a directory");
+        if(typeof filesystem !== "object") throw new Error("Cannot mount filesystem: not an object");
+        if(filesystem.magic !== 20) throw new Error("Mount failed: not a filesystem");
+        // Check if the filesystem already exists in the mount table
+        for(let fs of mount_table) {
+            if(!fs) continue;
+            if(fs.uuid === filesystem.uuid)
+                throw new Error("Mount failed: Filesystem already exists in mount table.");
+        }
+
         file.inode.mount(mount_table.length);
         filesystem.mount(mount_table.length, file.inode);
         mount_table.push(filesystem);
@@ -186,18 +197,28 @@ let errno;
         mount_fs(fs, path);
         kdebug("Device " + full_path(device) + " mounted at " + full_path(path));
     }
+    let unmount_fs = function(filesystem) {
+        if(!filesystem || typeof filesystem !== "object") throw new Error("Filesystem invalid");
+        if(filesystem.mountpoint === false) throw new Error("Cannot unmount filesystem: not mounted");
+        let inode = filesystem.parent_inode;
+
+        if(inode.mountpoint === false) throw new Error("Cannot unmount filesystem: ");
+        mount_table[filesystem.mountpoint] = undefined;
+        inode.mountpoint = false;
+        filesystem.mountpoint = false;
+        filesystem.root.mountpoint = false;
+    }
     function umount(path) {
         let file = get_file(path);
         if(file.incomplete) throw new Error("File does not exist at " + path);
-        let inode = file.inode;
-        if(file.type === "m") {
-            mount_table[inode.mountpoint] = null
-            inode.get_data().parent_inode.umount();
+        let filesystem;
+        if(file.inode.type === "d") {
+            console.log(file.inode.mountpoint, file.inode.path)
+            filesystem = mount_table[file.inode.mountpoint];
         }
-        if(file.type === "d") {
-            mount_table[inode.mountpoint] = null
-            inode.get_data().umount();
-        }
+        else if(typeof file.inode.get_data() === "object")
+            filesystem = file.inode.get_data();
+        unmount_fs(filesystem);
         return 0;
     }
 
@@ -280,6 +301,11 @@ let errno;
             if(time >= this.last_exec + this.sleep)
                 return true;
             return false;
+        }
+        slept(time) {
+            if(this.sleep === 0)
+                return false;
+            return this.is_ready(time);
         }
         run() {
             this.exec(...this.args);
@@ -425,6 +451,10 @@ let errno;
                     this.kill();
                     if(c_process.pid === this.pid) interrupt();
                     break;
+                case 15:
+                    this.kill();
+                    if(c_process.pid === this.pid) interrupt();
+                    break;
             }
             this.waiting = false;
         }
@@ -458,6 +488,7 @@ let errno;
         if(!c_process) panic("wait() was run outside of kernel context");
         if(c_process.children.length !== 0)
             c_process.waiting = true;
+        interrupt();
     }
     function exec(path, ...args) {
         let file = get_file(path);
@@ -541,7 +572,7 @@ let errno;
                     if(!is_interrupt(e)) {
                         console.error(thread.process.cmdline + " (" + thread.process.pid + ") encountered an error (thread: " + thread.pid + ")");
                         console.error(e);
-                        fprintf(stderr, thread.process.cmdline + " encountered an error: " + e + "\n");
+                        fprintf(stderr, thread.process.command + ": " + e.message + "\n");
                         c_process.kill();
                     }
                 }
@@ -552,6 +583,36 @@ let errno;
         c_process = null;
         c_user = null;
         c_thread = null;
+    }
+
+    // Power manager: take advantage of dynamic kernel clocking
+    let loop_timeout = 10;
+    let dynamic_clock = function() {
+        loop_timeout = 100;
+        let earliest_exec_time = Infinity;
+        let time = get_time(3);
+        for(let process of processes) {
+            if(process.is_available()) {
+                for(let thread of process.threads) {
+                    if(thread.slept(time)) {
+                        kernel_main();
+                        kdebug("Scheduler was early");
+                    }
+                    if(thread.sleep < earliest_exec_time && thread.sleep > 0)
+                        earliest_exec_time = thread.sleep;
+                }
+            }
+        }
+        if(earliest_exec_time !== Infinity)
+            loop_timeout = earliest_exec_time
+    }
+
+    // Debug
+    const debug = true;
+    if(debug) {
+        function k_eval(string) {
+            return eval(string);
+        }
     }
 
     // tmpfs
@@ -571,9 +632,19 @@ let errno;
     mount_root(new JFS());
     
     /* Kernel-level device management */
-    let devfs = new JFS();
+    let devfs;
+    let create_device_pointer = function(device, name) {
+        devfs.create_file(0, "/dev/"+name, device, "-", 0, 511);
+    }
+    let create_devfs = function() {
+        devfs = new JFS();
+        mount_fs(devfs, "/dev");
+        devfs.create_file
+        create_device_pointer(devfs, "devfs");
+    }
     mkdir("/dev");
-    mount_fs(devfs, "/dev");
+    create_devfs();
+    create_device_pointer(root_fs, "disk0");
 
     // Disk drivers
 
@@ -601,7 +672,7 @@ let errno;
     window.root_fs = root_fs;
 
     // Init process
-    {
+    function create_init(){
         kdebug("Creating init");
         let init_code = new function() {
             this.main = function() {
@@ -611,15 +682,49 @@ let errno;
         }
         processes.push(new Process(init_code, 0, "/"));
     }
+    create_init();
+
+    // System management
+    let reset = function() {
+        processes[0].kill(); // Kill all processes
+        processes = [];
+        threads = [];
+        pids = 1;
+        loop_timeout = 10;
+    }
+    function reboot(op) {
+        switch(op) {
+            case 2: // Change to be accurate to actual UNIX
+                kdebug("Soft rebooting system (without unmounting)");
+                reset();
+                create_init();
+                break;
+            default:
+                kdebug("Soft rebooting system...");
+                reset();
+                for(let fs of mount_table)
+                    if(fs && typeof fs === "object")
+                        unmount_fs(fs);
+                create_devfs();
+                create_init();
+                break;
+        }
+    }
 
     // Execution loop
     kdebug("Beginning execution loop");
-    interval = setInterval(() => {
+    let kernel_main = () => {
         try {
             scheduler();
+            dynamic_clock();
         } catch (e) {
             panic("Critical error in kernel.");
             console.error(e);
         }
-    }, 10);
+    }
+    let kernel_loop = () => {
+        kernel_main();
+        setTimeout(kernel_loop, loop_timeout);
+    }
+    kernel_loop(); // Start execution
 }

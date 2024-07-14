@@ -1,5 +1,11 @@
 let fd, element;
-let update_display = function() {
+let init = false;
+this.main = function() {
+    if(!init) {
+        element = document.getElementById("console");
+        fd = fopen("/dev/console", "w");
+        init = true;
+    }
     let string = read(fd);
     let buff = element.innerText;
     let char;
@@ -20,11 +26,5 @@ let update_display = function() {
     if(string.length > 0)
         element.innerText = buff
     write(fd, "");
-    sleep(30);
-}
-this.main = function() {
-    element = document.getElementById("console");
-    fd = fopen("/dev/console", "w");
-    sleep(-1);
-    thread(update_display, []);
+    sleep(30)
 }

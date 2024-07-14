@@ -1,5 +1,5 @@
 this.main = function() {
     // Mount permanent storage
-    mount("/dev/disk0", "/home");
+    mount("/dev/disk1", "/home");
     exit();
 }

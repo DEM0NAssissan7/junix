@@ -21,7 +21,7 @@ this.main = () => {
 }
 let wait = false;
 function post_driver() {
-    if(!wait) {
+    if(!wait) { // Allow the drivers to initialize before starting /etc/rc
         wait = true;
         return;
     }

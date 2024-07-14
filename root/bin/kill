@@ -1,3 +1,7 @@
 this.main = function(args) {
-    
+    let name_map = args.split(" ");
+    let pid = parseInt(name_map[0]);
+    let signal = parseInt(name_map[1] ?? 15);
+    kill(pid, signal);
+    exit();
 }
