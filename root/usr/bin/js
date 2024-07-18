@@ -1,5 +1,17 @@
 this.main = function(args) {
-    let fd = fopen(args, "r");
-    (function(){(read(fd))();})()
+    let args_split = args.split(' ');
+    let fd = fopen(args[0], "r");
+    let data = read(fd);
+    console.log(data);
+    if(typeof data === "string")
+        data = (new Function("return function(){"+data+"}"))();
+    let evals = [];
+    for(let i = 1; i < args_split.length; i++)
+        evals.push(args_split[i]);
+    (function(){
+        (data)();
+        for(let eval of evals)
+            ((new Function("return function(){" + eval + "}"))())()
+    })()
     exit();
 }
