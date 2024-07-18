@@ -72,6 +72,7 @@ class JFS {
         }
         this.magic = 20;
         this.uuid = random(0, 8196);
+        this.fds = 0;
     }
     stringify() {
         let inodes = [];
@@ -83,7 +84,7 @@ class JFS {
             casefold: this.casefold,
             magic: 20,
             uuid: this.uuid
-        })
+        })  
     }
     parse(string) {
         let obj = JSON.parse(string);

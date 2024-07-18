@@ -110,13 +110,14 @@ let errno;
         kdebug("Entered kernel");
 
         //Panic
-        let interval;
         let panic = function(message) {
-            clearInterval(interval);
+            stop_kernel();
+            sync(); // Make sure disks are synced before presenting error so the user doesn't lose data
             alert("Panic! -> " + message);
             console.error("Kernel panic (" + get_time() + ")");
             console.error(message);
             kerror("Kernel panic: " + message);
+            kernel_timeout_id = setTimeout(() => reboot(9), 60000);
             throw new Error("Panic!");
         }
 
@@ -133,6 +134,8 @@ let errno;
                 this.user = user;
                 this.inode = inode;
                 this.filesystem = filesystem;
+                if(filesystem)
+                    filesystem.fds++;
                 if(inode)
                     this.filetype = inode.type;
                 this.buffer = data;
@@ -162,6 +165,15 @@ let errno;
             append(data) {
                 this.update_buffer();
                 this.write(this.buffer + data);
+            }
+            close(){
+                if(this.filesystem) {
+                    this.filesystem.fds--;
+                    if(this.filesystem.fds < 0){
+                        console.error(this.filesystem.mountpoint + " fs had " + this.filesystem.fds + " fds");
+                        panic("Fatal error occured in routine filesystem check. Something has gone terribly wrong.");
+                    }
+                }
             }
             flush() {
                 if(this.inode)
@@ -260,12 +272,18 @@ let errno;
             mount_fs(fs, path);
             kdebug("Device " + full_path(device) + " mounted at " + full_path(path));
         }
+        function is_busy(filesystem) {
+            if(filesystem.fds > 0) return true;
+            return false;
+        }
         let unmount_fs = function(filesystem) {
             if(!filesystem || typeof filesystem !== "object") throw new Error("Filesystem invalid");
+            if(filesystem.magic !== 20) throw new Error("Filesystem invalid");
             if(filesystem.mountpoint === false) throw new Error("Cannot unmount filesystem: not mounted");
             let inode = filesystem.parent_inode;
 
-            if(inode.mountpoint === false) throw new Error("Cannot unmount filesystem: ");
+            if(inode.mountpoint === false) throw new Error("Cannot unmount filesystem: not mounted(?)");
+            if(is_busy(filesystem)) throw new Error("filesystem is busy");
             filesystem.sync(); // Sync filesystem before unmounting
             mount_table[filesystem.mountpoint] = undefined;
             inode.mountpoint = false;
@@ -316,7 +334,8 @@ let errno;
         let get_file = function(path) {
             if(!path) throw new Error("No path specified");
             let path_names = map_full_path_names(path);
-            let filesystem = root_fs;
+            let filesystem = mount_table[0];
+            if(!filesystem) throw new Error("No root filesystem");
             let index = 0;
             let inode = filesystem.get_inode(index);
             let name_index = 0;
@@ -504,8 +523,8 @@ let errno;
             }
             create_descriptor(descriptor) {
                 let r = this.add_descriptor(descriptor);
-                if(r === null) throw new Error("Could not create file descriptor: unkown error")
-                return this.descriptor_table.length - 1;
+                if(r === null) throw new Error("Could not create file descriptor: unknown error")
+                return r;
             }
             get_descriptor(fd) {
                 let descriptor = this.descriptor_table[fd];
@@ -514,10 +533,14 @@ let errno;
             }
             close(fd) {
                 if(!this.descriptor_table[fd]) throw new Error("No file descriptor at " + fd);
+                this.descriptor_table[fd].close();
                 this.descriptor_table[fd] = undefined;
             }
             duplicate(fd) {
-                return this.add_descriptor(this.get_descriptor(fd))
+                let descriptor = this.get_descriptor(fd);
+                if(descriptor.filesystem)
+                    descriptor.filesystem.fds++;
+                return this.add_descriptor(descriptor);
             }
             signal(code) {
                 switch(code) {
@@ -533,6 +556,11 @@ let errno;
                 this.waiting = false;
             }
             kill() {
+                for(let i = 0; i < this.descriptor_table.length; i++) {
+                    let descriptor = this.descriptor_table[i];
+                    if(!descriptor) continue;
+                    this.close(i);
+                }
                 for(let child of this.children) {
                     child.kill();
                 }
@@ -694,13 +722,15 @@ let errno;
             */
 
         // Root & tmpfs
-        let root_fs;
         let mount_root = function(filesystem) {
-            filesystem.mount("/");
-            root_fs = filesystem;
+            filesystem.mount(0, "/");
+            mount_table[0] = filesystem;
         }
-        kdebug("Mounting initrootf");
-        mount_root(new JFS());
+        function create_init_rootfs() {
+            kdebug("Mounting initial rootfs");
+            mount_root(new JFS());
+        }
+        create_init_rootfs();
         
         /* Kernel-level device management */
         let devfs;
@@ -711,7 +741,7 @@ let errno;
             devfs = new JFS();
             mount_fs(devfs, "/dev");
             create_device_pointer(devfs, "devfs");
-            create_device_pointer(root_fs, "disk0");
+            create_device_pointer(mount_table[0], "disk0");
         }
         mkdir("/dev");
         create_devfs();
@@ -720,26 +750,26 @@ let errno;
 
         /* 'rootfs_build' driver
         This should be the only driver that runs in kernel-mode */
-        if(kargs.initfs_table) {
-            (function() {
-                kdebug("Building root filesystem from fs definition table");
-                let table = kargs.initfs_table;
-                for(let entry of table) {
-                    if(entry.length === 1)
-                        mkdir(entry[0]);
-                    if(entry.length === 2) {
-                        let file = get_file(entry[0]);
-                        root_fs.create_file(file.inode.index, get_filename(entry[0]), entry[1], "-", 0, 711);        
-                    }
+        function rootfs_build() {
+            kdebug("Building root filesystem from fs definition table");
+            let table = kargs.initfs_table;
+            for(let entry of table) {
+                if(entry.length === 1)
+                    mkdir(entry[0]);
+                if(entry.length === 2) {
+                    let file = get_file(entry[0]);
+                    mount_table[0].create_file(file.inode.index, get_filename(entry[0]), entry[1], "-", 0, 711);        
                 }
-            })();
+            }
+        }
+        if(kargs.initfs_table) {
+            rootfs_build();
         } else if(kargs.fs_path) {
             kdebug("Mounting root from device map");
             mount(kargs.fs_path, "/");
         } else {
             kwarn("Kernel running headless. Tmpfs being used for root.");
         }
-        root_fs = root_fs;
 
         // Init process
         function create_init(){
@@ -757,11 +787,25 @@ let errno;
         // System management
         let reset = function() {
             processes[0].kill(); // Kill all processes
+            purge();
+        }
+        function purge() {
             processes = [];
             threads = [];
             pids = 1;
             loop_timeout = 10;
         }
+        function dirty_purge() {
+            kwarn("Running dirty purge: all runtime kernel data will be completley lost");
+            purge();
+            for(let filesystem of mount_table) {
+                filesystem.fds = 0;
+                filesystem.mountpoint = false;
+                filesystem.parent_inode = null;
+                filesystem.inodes[0].mountpoint = null;
+            }
+            mount_table = [];
+        } 
         function stop_kernel() {
             clearTimeout(kernel_timeout_id);
             loop_timeout = Infinity; // Prevent further execution
@@ -779,7 +823,7 @@ let errno;
                     kdebug("Rebooting...");
                     reset();
                     unmount_all();
-                    entered = false;
+                    stop_kernel();
                     kernel_entry(kargs); // Re-enter kernel with the same argument. This will completely reinitialize the system.
                     break;
                 case 4:
@@ -795,7 +839,7 @@ let errno;
                     reset();
                     unmount_all();
                     stop_kernel();
-                    close();
+                    js_close();
                     break;
                 case 6:
                     // Hard Boot (this basically acts like a bootloader that lives in memory)
@@ -805,7 +849,10 @@ let errno;
                 case 7:
                     // Reinit
                     kdebug("Reinitializing system...");
+                    create_init_rootfs();
+                    mkdir("/dev");
                     create_devfs();
+                    rootfs_build();
                     create_init();
                     break;
                 case 8:
@@ -814,10 +861,36 @@ let errno;
                     reset();
                     unmount_all();
                     break;
+                case 9:
+                    // Panic reboot
+                    kdebug("Rebooting from panic");
+                    stop_kernel();
+                    dirty_purge();
+                    kernel_entry(kargs);
+                    break;
                 default:
                     throw new Error("opcode invalid");
             }
         }
+
+        // Javascript function reassignment. This will help prevent data loss
+        js_close = close;
+        close = function() {
+            try {
+                reboot(5);
+            } catch (e) {
+                js_close();
+            }
+        }
+        window.addEventListener("beforeunload", function (e) {
+            try {
+                reboot(5); // Clean shutdown on unload
+            } catch (e) {
+                sync(); // Sync disk if that fails
+            }
+            return undefined;
+          });
+          
 
         // Execution loop
         kdebug("Beginning execution loop");
