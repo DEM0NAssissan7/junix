@@ -1,4 +1,5 @@
 let buffer = "";
+let prototype;
 let cursor = 0;
 let filename = "";
 let dir = "";
@@ -15,6 +16,12 @@ this.main = function(args) {
                 buffer = buffer.toString();
                 break;
             case "object":
+                if(buffer.magic === 20) {
+                    buffer = buffer.stringify();
+                    filetype = "filesystem";
+                    break;
+                }
+                prototype = buffer;
                 buffer = JSON.stringify(buffer);
                 break;
         }
@@ -28,11 +35,19 @@ this.main = function(args) {
 
 function write_changes() {
     let fd = fopen(dir, "w");
-    if(filetype === "function") {
-        buffer = (new Function("return " + buffer))();
-    }
-    if(filetype === 'object') {
-        buffer = JSON.parse(buffer);
+    switch(filetype) {
+        case "function":
+            buffer = (new Function("return " + buffer))();
+            break;
+        case "object":
+            Object.assign(prototype, JSON.parse(buffer));
+            buffer = prototype;
+            break;
+        case "filesystem":
+            let fs = new JFS();
+            fs.parse(buffer)
+            buffer = fs;
+            break;
     }
     write(fd, buffer);
     fclose(fd);
@@ -79,7 +94,7 @@ function read_input() {
 function draw_screen() {
     printf("\?");
 
-    printf("file: "+dir + "\n\n" + place_char(buffer, "|", cursor));
+    printf(filetype + ": "+dir + "\n\n" + place_char(buffer, "|", cursor));
 }
 
 function move_cursor(value) {
