@@ -56,5 +56,5 @@ print("Building OS image")
 builddir(osroot, "", 0)
 
 # Add kernel
-add_file("boot.js")
 add_file("kernel/kernel.js")
+add_file("boot/bootloader.js")
