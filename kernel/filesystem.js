@@ -3,15 +3,14 @@ function inode_parse(string) {
     let data = obj.data;
     if(obj.data_type === "function")
         data = (new Function("return function(){" + obj.data + "}"))();
-    return new Inode(obj.index, obj.path, data, obj.type, obj.user, obj.mode);
+    return new Inode(obj.index, obj.filename, data, obj.type, obj.user, obj.mode);
 }
 class Inode {
-    constructor(index, path, data, type, user, mode) {
+    constructor(index, filename, data, type, user, mode) {
         this.index = index;
-        this.path = path;
         this.data = data;
-        let filename = get_filename(path);
-        if(filename.length !== 0) this.filename = filename;    
+        this.filename = filename;
+        if(filename.length === 0) throw new Error("Invalid inode file name");
         this.type = type;
         this.user = user;
         this.mode = mode;
@@ -52,10 +51,9 @@ class Inode {
             data = data.toString();
         return JSON.stringify({
             index: this.index,
-            path: this.path,
+            filename: this.filename,
             data: this.data,
             data_type: typeof this.data,
-            filename: this.filename,
             type: this.type,
             user: this.user,
             mode: this.mode
@@ -65,8 +63,7 @@ class Inode {
 
 class JFS {
     constructor (options) {
-        this.root = new Inode(0, "/", [], "d", 0, 111);
-        this.inodes = [this.root];
+        this.inodes = [new Inode(0, "/", [], "d", 0, 111)];
         this.indexes = 1;
         this.mountpoint = false;
         this.casefold = true;
@@ -81,7 +78,6 @@ class JFS {
         for(let inode of this.inodes)
             inodes.push(inode.stringify());
         return JSON.stringify({
-            root: this.root.stringify(),
             inodes: inodes,
             indexes: this.indexes,
             casefold: this.casefold,
@@ -95,16 +91,15 @@ class JFS {
         let inodes = [];
         for(let inode_string of obj.inodes)
             inodes.push(inode_parse(inode_string))
-        this.root = inode_parse(obj.root);
         this.inodes = inodes;
         this.indexes = obj.indexes;
         this.casefold = obj.casefold;
         this.magic = obj.magic;
         this.uuid = obj.uuid;
     }
-    create_file(parent_index, path, data, type, user, mode) {
+    create_file(parent_index, filename, data, type, user, mode) {
         let parent_inode = this.get_inode(parent_index);
-        let inode = new Inode(this.indexes, path, data, type, user, mode);
+        let inode = new Inode(this.indexes, filename, data, type, user, mode);
         this.inodes.push(inode);
         parent_inode.add_directory_entry(this.indexes++);
         return inode;
@@ -118,7 +113,7 @@ class JFS {
         if(this.mountpoint !== false) throw new Error("Cannot mount filesystem: already mounted");
         this.mountpoint = index;
         this.parent_inode = inode;
-        this.root.mountpoint = index;
+        this.inodes[0].mountpoint = index;
     }
     sync() {
         // Defined by driver

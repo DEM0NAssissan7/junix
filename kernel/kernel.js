@@ -178,7 +178,7 @@ let errno;
             if(file.incomplete) {
                 if(flags === "r") throw new Error("File " + path + " does not exist");
                 kdebug("Creating file at " + path);
-                inode = file.filesystem.create_file(inode.index, path, "", "-", c_user, mode ?? inode.mode);
+                inode = file.filesystem.create_file(inode.index, get_filename(path), "", "-", c_user, mode ?? inode.mode);
             }
 
             let descriptor = new FileDescriptor(inode.get_data(), flags, inode.mode, c_user, inode, file.filesystem);
@@ -214,7 +214,7 @@ let errno;
         mkdir = function(path) {
             let file = get_file(path);
             if(file.incomplete)
-                file.filesystem.create_file(file.inode.index, path, [], "d", c_user, file.inode.mode);
+                file.filesystem.create_file(file.inode.index, get_filename(path), [], "d", c_user, file.inode.mode);
         }
         opendir = function(path) {
             let file = get_file(path);
@@ -270,7 +270,7 @@ let errno;
             mount_table[filesystem.mountpoint] = undefined;
             inode.mountpoint = false;
             filesystem.mountpoint = false;
-            filesystem.root.mountpoint = false;
+            filesystem.inodes[0].mountpoint = false;
         }
         let unmount_all = function() {
             for(let fs of mount_table)
@@ -282,7 +282,6 @@ let errno;
             if(file.incomplete) throw new Error("File does not exist at " + path);
             let filesystem;
             if(file.inode.type === "d") {
-                console.log(file.inode.mountpoint, file.inode.path)
                 filesystem = mount_table[file.inode.mountpoint];
             }
             else if(typeof file.inode.get_data() === "object")
@@ -706,12 +705,11 @@ let errno;
         /* Kernel-level device management */
         let devfs;
         let create_device_pointer = function(device, name) {
-            devfs.create_file(0, "/dev/"+name, device, "-", 0, 511);
+            devfs.create_file(0, name, device, "-", 0, 511);
         }
         let create_devfs = function() {
             devfs = new JFS();
             mount_fs(devfs, "/dev");
-            devfs.create_file
             create_device_pointer(devfs, "devfs");
             create_device_pointer(root_fs, "disk0");
         }
@@ -731,7 +729,7 @@ let errno;
                         mkdir(entry[0]);
                     if(entry.length === 2) {
                         let file = get_file(entry[0]);
-                        root_fs.create_file(file.inode.index, entry[0], entry[1], "-", 0, 711);        
+                        root_fs.create_file(file.inode.index, get_filename(entry[0]), entry[1], "-", 0, 711);        
                     }
                 }
             })();
