@@ -90,6 +90,14 @@ let internal_commands = [
     }],
     ["echo", (args) => {
         printf(args + "\n");
+    }],
+    ["which", (args) => {
+        let path = find_path(args);
+        if(path === "") {
+            printf("'" + args + "' was not found\n");
+            return;
+        }
+        printf(path + "/" + args + "\n");
     }]
 ]
 function run_script(string) {
