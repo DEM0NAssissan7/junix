@@ -1,3 +1,10 @@
+function inode_parse(string) {
+    let obj = JSON.parse(string);
+    let data = obj.data;
+    if(obj.data_type === "function")
+        data = (new Function("return function(){" + obj.data + "}"))();
+    return new Inode(obj.index, obj.path, data, obj.type, obj.user, obj.mode);
+}
 class Inode {
     constructor(index, path, data, type, user, mode) {
         this.index = index;
@@ -39,6 +46,21 @@ class Inode {
         if(target_index === -1) throw new Error("Directory entry not found (target inode reference: " + index + ")");
         this.data.splice(target_index, 1);
     }
+    stringify() {
+        let data = this.data;
+        if(typeof this.data === "function")
+            data = data.toString();
+        return JSON.stringify({
+            index: this.index,
+            path: this.path,
+            data: this.data,
+            data_type: typeof this.data,
+            filename: this.filename,
+            type: this.type,
+            user: this.user,
+            mode: this.mode
+        });
+    }
 }
 
 class JFS {
@@ -53,6 +75,32 @@ class JFS {
         }
         this.magic = 20;
         this.uuid = random(0, 8196);
+    }
+    stringify() {
+        let inodes = [];
+        for(let inode of this.inodes)
+            inodes.push(inode.stringify());
+        return JSON.stringify({
+            root: this.root.stringify(),
+            inodes: inodes,
+            indexes: this.indexes,
+            casefold: this.casefold,
+            magic: 20,
+            uuid: this.uuid
+        })
+    }
+    parse(string) {
+        let obj = JSON.parse(string);
+        if(obj.magic !== 20) throw new Error("Parsing filesystem failed: magic number incorrect (" + obj.magic + " instead of 20)");
+        let inodes = [];
+        for(let inode_string of obj.inodes)
+            inodes.push(inode_parse(inode_string))
+        this.root = inode_parse(obj.root);
+        this.inodes = inodes;
+        this.indexes = obj.indexes;
+        this.casefold = obj.casefold;
+        this.magic = obj.magic;
+        this.uuid = obj.uuid;
     }
     create_file(parent_index, path, data, type, user, mode) {
         let parent_inode = this.get_inode(parent_index);
@@ -72,10 +120,7 @@ class JFS {
         this.parent_inode = inode;
         this.root.mountpoint = index;
     }
-    stringify() {
-        return "";
-    }
-    parse(string) {
-        return "";
+    sync() {
+        // Defined by driver
     }
 }
