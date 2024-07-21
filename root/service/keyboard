@@ -17,7 +17,8 @@ const key_replacements = [
     ["Shift", ''],
     ["Enter", '\n'],
     ["Meta", ''],
-    ["Control", '\c']
+    ["Control", '\c'],
+    ["Tab", '\t']
 ]
 
 function replace_keys(key) {

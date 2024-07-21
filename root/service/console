@@ -18,6 +18,7 @@ this.main = function() {
             case '\?':
                 buff = "";
                 break;
+            case '\r':
             default:
                 buff += char;
                 break;

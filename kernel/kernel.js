@@ -23,6 +23,7 @@ var write; // Write data to file descriptor
 var access; // Check if file exists
 var dup; // Duplicate file descriptor
 var fclose; // Close file descriptor
+var stat; // See the status of a file (its type, user, permissions, etc)
 
 /* Directory management */
 
@@ -41,6 +42,7 @@ var sync; // Synchronize all cached file changes to disk
 /* Process & Thread management */
 
 var getpid; // Get PID of current process
+var getuid; // Get User ID of calling process
 var fork; // Duplicate current process
 var wait; // Suspend current process until a signal is recieved or a child finishes
 var exec; // Replace current process code with a program
@@ -223,6 +225,13 @@ let errno;
             descriptor.flush();
             c_process.close(fd);
         }
+        stat = function(path) {
+            let inode = get_file(path).inode;
+            return {
+                type: inode.type,
+                user: inode.user,
+            }
+        }
         mkdir = function(path) {
             let file = get_file(path);
             if(file.incomplete)
@@ -316,12 +325,14 @@ let errno;
 
         // Kernel file tools
         let full_path_dirty = function(path) {
-            if(path.length === 0) throw new Error("Invalid path");
             let working_path = "";
-            if(path[0] !== "/") {
-                working_path = "/";
-                if(c_process)
-                    working_path = c_process.working_path;
+            if(c_process)
+                working_path = c_process.working_path;
+            else {
+                if(path.length === 0) throw new Error("Invalid path");
+                if(path[0] !== "/") {
+                    working_path = "/";
+                }
             }
             return working_path + "/" + path;
         }
@@ -576,6 +587,9 @@ let errno;
         }
         getpid = function() {
             return c_process.pid;
+        }
+        getuid = function() {
+            return c_process.user;
         }
         fork = function(intermediate_code) {
             if(!c_process) panic("Fork was run outside of kernel context");

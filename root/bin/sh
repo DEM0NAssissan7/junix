@@ -1,5 +1,6 @@
 let buffer = "";
-const prompt = "#";
+let previous_commands = [];
+let prompt = "#";
 const cursor_char = "_";
 let paths = [];
 let env;
@@ -13,7 +14,9 @@ this.main = function(args, envp) {
     
         paths = get_variable_value("PATH", env).split(":");
     
-        printf(version_string+"\n")
+        printf(version_string+"\n");
+        if(getuid() !== 0)
+            prompt = "$";
         reprompt();
         init = true;
     }
@@ -31,6 +34,65 @@ this.main = function(args, envp) {
         add_to_buffer(b)
         run_queue();
     }
+}
+
+function test_completion(candidates, names, verb) {
+    for(let name of names) {
+        let failed = false;
+        for(let i = 0; i < verb.length; i++) {
+            if(name[i] !== verb[i]) {
+                failed = true;
+                break;
+            }
+        }
+        if(!failed)
+            candidates.push(name);
+    }
+}
+
+function test_completion_match(candidates, path, verb) {
+    let fd = opendir(path);
+    let _candidates = [];
+    test_completion(_candidates, listdir(fd), verb);
+    for(let c of _candidates) {
+        console.log(stat(path + "/" + c));
+        if(stat(path + "/" + c).type === 'd')
+            candidates.push(c + "/");
+        else
+            candidates.push(c + " ");
+    }
+    fclose(fd);
+}
+
+function tab_completion(verb, find_commands) {
+    let candidates = [];
+    if(verb.length === 1 && verb[0] === ".") return ['./'];
+    if(verb[0] !== "/" && verb[0] !== "." && find_commands) {
+        test_completion(candidates, internal_commands.map(a => a[0]), verb);
+        for(let path of paths) {
+            try {
+                test_completion_match(candidates, path, verb);
+            } catch (e) {
+                fprintf(stderr, "Invalid PATH\n");
+                fprintf(stderr, e + "\n");
+            }
+        }
+    } else {
+        try {
+            let _verb = verb.split("/");
+            let _path = _verb.toSpliced(_verb.length - 1, 1);
+            let path = "";
+            for(let e of _path)
+                path += e;
+            console.log(path, path.length);
+            test_completion_match(candidates, dirname(path), _verb[_verb.length - 1]);
+        } catch (e) {
+            console.error(e);
+            return [];
+        }
+    }
+    candidates = candidates.sort();
+    return candidates;
 }
 
 function add_to_buffer(b) {
@@ -55,6 +117,26 @@ function add_to_buffer(b) {
                 }
                 else
                     reprompt();
+                break;
+            case '\t':
+                let verbs = buffer.split(' ');
+                let verb = verbs[verbs.length - 1];
+                let verb_paths = verb.split('/');
+                let candidates = tab_completion(verb, verbs.length === 1);
+                if(candidates.length === 1) {
+                    // Clear buffer from print
+                    for(let i = 0; i < buffer.length; i++)
+                        printf("\b");
+                    buffer = buffer.substring(0, buffer.length - verb_paths[verb_paths.length - 1].length);
+                    let complete = candidates[0];
+                    buffer += complete;
+                    printf(buffer);
+                } else {
+                    printf("\n")
+                    for(let candidate of candidates)
+                        printf(candidate + " ");
+                    printf("\n" + prompt + " " + buffer);
+                }
                 break;
             default:
                 printf(a)
@@ -132,6 +214,8 @@ function parse_input(buffer) {
                 add_to_queue(false);
                 break;
             case ' ':
+                if(i === buffer.length - 1)
+                    break;
                 if(buffer[i+1] === " ")
                     break;
                 if(command.length === 0 && token.length !== 0) {
@@ -181,9 +265,13 @@ function execute_command(command, args) {
                 fprintf(stderr, "sh: "+e+"\n")
         }
     } else {
-        let cmdline = find_path(command) + "/" + command;
+        let cmdline;
+        if(command[0] === "/" || command[0] === ".")
+            cmdline = command;
+        else
+            cmdline = find_path(command) + "/" + command;
         if(!access(cmdline)) {
-            fprintf(stderr, "Command "+command+" not found\n");
+            fprintf(stderr, command + " not found\n");
             return 1;
         }
         let fd = fopen(cmdline, "r");
