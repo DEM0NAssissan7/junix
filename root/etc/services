@@ -2,4 +2,5 @@
 /service/disk
 /service/mount
 /service/keyboard
-/service/console
+/service/graphics
+/service/mouse

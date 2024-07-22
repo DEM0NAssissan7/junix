@@ -13,6 +13,11 @@ function deep_obj(object) {
     // return object;
 }
 
+function round(number, accuracy) {
+    let _a = Math.pow(10, accuracy);
+    return Math.round(number * _a) / _a;
+}
+
 {
     let time = performance.now();
     function get_time(accuracy) {

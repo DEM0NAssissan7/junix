@@ -18,7 +18,12 @@ const key_replacements = [
     ["Enter", '\n'],
     ["Meta", ''],
     ["Control", '\c'],
-    ["Tab", '\t']
+    ["Tab", '\t'],
+    ["ArrowUp", '\x00'],
+    ["ArrowRight", '\x01'],
+    ["ArrowDown", '\x02'],
+    ["ArrowLeft", '\x03'],
+    ["CapsLock", ""],
 ]
 
 function replace_keys(key) {

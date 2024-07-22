@@ -1,0 +1,31 @@
+let init = false;
+let fd;
+let mouse_moved = true;
+let mouse = {
+    x: 0,
+    y: 0,
+    vectorX: 0,
+    vectorY: 0
+}
+this.main = function() {
+    if(!init) {
+        fd = fopen("/dev/mouse", "w");
+        init = true;
+    }
+    if(mouse_moved) {
+        write(fd, mouse);
+        mouse_moved = false;
+    } else {
+        mouse.vectorX = 0;
+        mouse.vectorY = 0;
+    }
+}
+document.onmousemove = e => {
+    mouse = {
+        x: e.x,
+        y: e.y,
+        vectorX: e.x - mouse.x,
+        vectorY: e.y - mouse.y
+    }
+    mouse_moved = true;
+}

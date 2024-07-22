@@ -1,5 +1,6 @@
 let buffer = "";
-let previous_commands = [];
+let previous_buffers = [];
+let seeker_index = 0;
 let prompt = "#";
 const cursor_char = "_";
 let paths = [];
@@ -55,7 +56,6 @@ function test_completion_match(candidates, path, verb) {
     let _candidates = [];
     test_completion(_candidates, listdir(fd), verb);
     for(let c of _candidates) {
-        console.log(stat(path + "/" + c));
         if(stat(path + "/" + c).type === 'd')
             candidates.push(c + "/");
         else
@@ -69,6 +69,7 @@ function tab_completion(verb, find_commands) {
     if(verb.length === 1 && verb[0] === ".") return ['./'];
     if(verb[0] !== "/" && verb[0] !== "." && find_commands) {
         test_completion(candidates, internal_commands.map(a => a[0]), verb);
+        candidates = candidates.map(a => a + " ");
         for(let path of paths) {
             try {
                 test_completion_match(candidates, path, verb);
@@ -84,7 +85,6 @@ function tab_completion(verb, find_commands) {
             let path = "";
             for(let e of _path)
                 path += e;
-            console.log(path, path.length);
             test_completion_match(candidates, dirname(path), _verb[_verb.length - 1]);
         } catch (e) {
             console.error(e);
@@ -111,7 +111,9 @@ function add_to_buffer(b) {
             case '\n':
                 printf('\n')
                 command_ran = true;
+                seeker_index = 0;
                 if(buffer.length > 0) {
+                    previous_buffers.push(buffer);
                     parse_input(buffer);
                     break;
                 }
@@ -123,6 +125,8 @@ function add_to_buffer(b) {
                 let verb = verbs[verbs.length - 1];
                 let verb_paths = verb.split('/');
                 let candidates = tab_completion(verb, verbs.length === 1);
+                if(candidates.length === 0)
+                    break;
                 if(candidates.length === 1) {
                     // Clear buffer from print
                     for(let i = 0; i < buffer.length; i++)
@@ -137,6 +141,9 @@ function add_to_buffer(b) {
                         printf(candidate + " ");
                     printf("\n" + prompt + " " + buffer);
                 }
+                break;
+            case '\x00': // Up arrow
+                printf("HELLO WORLD")
                 break;
             default:
                 printf(a)

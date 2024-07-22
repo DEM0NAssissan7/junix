@@ -15,6 +15,7 @@ def add_file(path):
 # Add necessary static files
 add_file("libraries/mawi.js")
 add_file("libraries/stdlib.js")
+add_file("libraries/graphics.js")
 add_file("kernel/filesystem.js")
 add_file("fsbuild.js")
 

@@ -1,13 +1,25 @@
 <!DOCTYPE html>
+<style>
+    .console {
+        color: white;
+        font-family: monospace;
+        font-size: large;
+        position: absolute;
+    }
+    .canvas {
+        display: none;
+        position: absolute;
+    }
+</style>
 <html>
     <head>
         <!-- Libraries -->
         <script src="osimage.js"></script>
+        <!-- Canvas output -->
+        <canvas id="canvas" class="canvas"></canvas>
     </head>
     <body style="background: black">
-        <a id="console" style="
-        color: white;
-        font-family: monospace;
-        font-size: large;"></a>
+        <!-- Text mode output -->
+        <a id="console" class="console"></a>
     </body>
 </html>

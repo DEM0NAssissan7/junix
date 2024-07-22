@@ -1,0 +1,84 @@
+const framebuffer_device = "/dev/fbdev";
+const mouse_device = "/dev/mouse";
+const ctx_device = "/dev/ctx";
+const framerate = 60;
+let framebuff_fd, mouse_fd, ctx, ctx_fd;
+let init = false;
+let request_update = true;
+let cursor_canvas = new OffscreenCanvas(16, 16);
+let wallpaper_canvas;
+this.main = function () {
+    if (!init) {
+        framebuff_fd = fopen(framebuffer_device, "w");
+        mouse_fd = fopen(mouse_device, "r");
+        // Set mode
+        let window_fd = fopen("/dev/window", "r");
+        let _window = read(window_fd);
+        write(framebuff_fd, {
+            modeset: true,
+            width: _window.width,
+            height: _window.height
+        });
+        wallpaper_canvas = new OffscreenCanvas(_window.width, _window.height);
+        create_default_wallpaper();
+        fclose(window_fd);
+
+        ctx_fd = fopen(ctx_device, "r");
+        ctx = read(ctx_fd);
+        create_cursor_image();
+
+        init = true;
+        return;
+    }
+    request_update = detect_changes();
+    if (request_update) {
+        draw_background();
+        // Render cursor
+        render_cursor();
+        console.log("frame");
+        request_update = false;
+    }
+    sleep(1000 / framerate);
+}
+
+function detect_changes() {
+    let mouse = read(mouse_fd);
+    if (round(mouse.vectorX, 2) !== 0 || round(mouse.vectorY, 2) !== 0)
+        return true;
+    return false;
+}
+function create_cursor_image() {
+    let _ctx = cursor_canvas.getContext("2d");
+    _ctx.strokeStyle = 'white';
+    _ctx.fillStyle = 'black';
+    _ctx.lineWidth = 1;
+    _ctx.beginPath();
+    //Base (left)
+    _ctx.moveTo(0, 0);
+    _ctx.lineTo(0, 13);
+    //Handle (left)
+    _ctx.lineTo(3, 10);
+    //Handle base (l/r)
+    _ctx.lineTo(5, 15);
+    _ctx.lineTo(8, 14);
+    //Handle (right)
+    _ctx.lineTo(6, 9);
+    //Base (right)
+    _ctx.lineTo(10, 9);
+    _ctx.lineTo(0, 0);
+
+    _ctx.fill();
+    _ctx.stroke();
+}
+function render_cursor() {
+    let mouse = read(mouse_fd);
+    console.log(mouse);
+    ctx.drawImage(cursor_canvas, mouse.x, mouse.y);
+}
+function draw_background() {
+    ctx.drawImage(wallpaper_canvas, 0, 0);
+}
+function create_default_wallpaper() {
+    let _ctx = wallpaper_canvas.getContext("2d");
+    _ctx.fillRect(0, 0, wallpaper_canvas.width, wallpaper_canvas.height);
+}
