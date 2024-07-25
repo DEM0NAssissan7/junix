@@ -863,6 +863,24 @@ let errno;
         }
         create_init();
 
+        // Javascript function reassignment. This will help prevent data loss
+        let js_close = close;
+        close = function () {
+            try {
+                reboot(5);
+            } catch (e) {
+                js_close();
+            }
+        }
+        window.addEventListener("beforeunload", function (e) {
+            try {
+                reboot(5); // Clean shutdown on unload
+            } catch (e) {
+                sync(); // Sync disk if that fails
+            }
+            return undefined;
+        });
+
         // System management
         let reset = function () {
             processes[0].kill(); // Kill all processes
@@ -890,86 +908,74 @@ let errno;
             loop_timeout = Infinity; // Prevent further execution
             entered = false; // Open the kernel to re-entry
         }
+        let rebooting = false;
         reboot = function (op) {
-            switch (op) {
-                case 2: // Change op to be accurate to actual UNIX
-                    kdebug("Soft rebooting system (without unmounting)...");
-                    reset();
-                    create_init();
-                    break;
-                case 3:
-                    // Kernel re-entry (hard reboot)
-                    kdebug("Rebooting...");
-                    reset();
-                    unmount_all();
-                    stop_kernel();
-                    kernel_entry(kargs); // Re-enter kernel with the same argument. This will completely reinitialize the system.
-                    break;
-                case 4:
-                    // Soft shutdown: Reset and do not reboot system
-                    kdebug("Soft shutdown...");
-                    reset();
-                    unmount_all();
-                    stop_kernel();
-                    break;
-                case 5:
-                    // Hard shutdown: Reset and close
-                    kdebug("Shutdown...");
-                    reset();
-                    unmount_all();
-                    stop_kernel();
-                    js_close();
-                    break;
-                case 6:
-                    // Hard Boot (this basically acts like a bootloader that lives in memory)
-                    kdebug("Hard Booting...");
-                    kernel_entry(kargs);
-                    break;
-                case 7:
-                    // Reinit
-                    kdebug("Reinitializing system...");
-                    create_init_rootfs();
-                    mkdir("/dev");
-                    create_devfs();
-                    rootfs_build();
-                    create_init();
-                    break;
-                case 8:
-                    // Kernel stasis: keep kernel alive with no processes (including no init)
-                    kdebug("Entering kernel stasis...");
-                    reset();
-                    unmount_all();
-                    break;
-                case 9:
-                    // Panic reboot
-                    kdebug("Rebooting from panic");
-                    stop_kernel();
-                    dirty_purge();
-                    kernel_entry(kargs);
-                    break;
-                default:
-                    throw new Error("opcode invalid");
+            if(!rebooting) {
+                rebooting = true;
+                switch (op) {
+                    case 2: // Change op to be accurate to actual UNIX
+                        kdebug("Soft rebooting system (without unmounting)...");
+                        reset();
+                        create_init();
+                        break;
+                    case 3:
+                        // Kernel re-entry (hard reboot)
+                        kdebug("Rebooting...");
+                        reset();
+                        unmount_all();
+                        stop_kernel();
+                        kernel_entry(kargs); // Re-enter kernel with the same argument. This will completely reinitialize the system.
+                        break;
+                    case 4:
+                        // Soft shutdown: Reset and do not reboot system
+                        kdebug("Soft shutdown...");
+                        reset();
+                        unmount_all();
+                        stop_kernel();
+                        break;
+                    case 5:
+                        // Hard shutdown: Reset and close
+                        kdebug("Shutdown...");
+                        reset();
+                        unmount_all();
+                        stop_kernel();
+                        js_close();
+                        break;
+                    case 6:
+                        // Hard Boot (this basically acts like a bootloader that lives in memory)
+                        kdebug("Hard Booting...");
+                        kernel_entry(kargs);
+                        break;
+                    case 7:
+                        // Reinit
+                        kdebug("Reinitializing system...");
+                        create_init_rootfs();
+                        mkdir("/dev");
+                        create_devfs();
+                        rootfs_build();
+                        create_init();
+                        break;
+                    case 8:
+                        // Kernel stasis: keep kernel alive with no processes (including no init)
+                        kdebug("Entering kernel stasis...");
+                        reset();
+                        unmount_all();
+                        break;
+                    case 9:
+                        // Panic reboot
+                        kdebug("Rebooting from panic");
+                        stop_kernel();
+                        dirty_purge();
+                        kernel_entry(kargs);
+                        break;
+                    default:
+                        throw new Error("opcode invalid");
+                }
+                rebooting = false;
+            } else {
+                kwarn("Cannot execute reboot: reboot in progress.");
             }
         }
-
-        // Javascript function reassignment. This will help prevent data loss
-        js_close = close;
-        close = function () {
-            try {
-                reboot(5);
-            } catch (e) {
-                js_close();
-            }
-        }
-        window.addEventListener("beforeunload", function (e) {
-            try {
-                reboot(5); // Clean shutdown on unload
-            } catch (e) {
-                sync(); // Sync disk if that fails
-            }
-            return undefined;
-        });
-
 
         // Execution loop
         kdebug("Beginning execution loop");
