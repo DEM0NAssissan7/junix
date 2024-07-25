@@ -83,8 +83,10 @@ function tab_completion(verb, find_commands) {
             let _verb = verb.split("/");
             let _path = _verb.toSpliced(_verb.length - 1, 1);
             let path = "";
-            for(let e of _path)
+            for(let e of _path) {
+                if(e === ".") continue;
                 path += e;
+            }
             test_completion_match(candidates, dirname(path), _verb[_verb.length - 1]);
         } catch (e) {
             console.error(e);

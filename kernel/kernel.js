@@ -235,6 +235,7 @@ let errno;
         }
         unlink = function(path) {
             let f = get_file(path);
+            if(f.inode.type !== "-") throw new Error("Cannot unlink a non-normal file.");
             f.filesystem.delete_file(f.inode.index);
         }
         mkdir = function (path) {
@@ -331,13 +332,9 @@ let errno;
         // Kernel file tools
         let full_path_dirty = function (path) {
             let working_path = "";
-            if (c_process)
-                working_path = c_process.working_path;
-            else {
-                if (path.length === 0) throw new Error("Invalid path");
-                if (path[0] !== "/") {
-                    working_path = "/";
-                }
+            if (c_process) {
+                if(path[0] !== "/")
+                    working_path = c_process.working_path;
             }
             return working_path + "/" + path;
         }

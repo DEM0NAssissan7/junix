@@ -1,6 +1,6 @@
 {
     const use_localstorage_driver = true;
-    const use_initfs_only = false;
+    const use_initfs_only = !use_localstorage_driver;
     const root = '/dev/disk0';
     
     // Bootloader: run the kernel with the appropriate environment

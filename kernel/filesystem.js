@@ -109,7 +109,6 @@ class JFS {
             }
         }
         let inode = new Inode(index, parent_index, filename, data, type, user, mode);
-        console.log(inode.parent_index);
         this.inodes[index] = inode;
         parent_inode.add_directory_entry(index);
         return inode;
