@@ -869,13 +869,14 @@ let errno;
             try {
                 reboot(5);
             } catch (e) {
-                js_close();
+                kerror(e);
             }
         }
         window.addEventListener("beforeunload", function (e) {
             try {
                 reboot(5); // Clean shutdown on unload
             } catch (e) {
+                kerror(e);
                 sync(); // Sync disk if that fails
             }
             return undefined;
@@ -917,6 +918,7 @@ let errno;
                         kdebug("Soft rebooting system (without unmounting)...");
                         reset();
                         create_init();
+                        rebooting = false;
                         break;
                     case 3:
                         // Kernel re-entry (hard reboot)
@@ -925,6 +927,7 @@ let errno;
                         unmount_all();
                         stop_kernel();
                         kernel_entry(kargs); // Re-enter kernel with the same argument. This will completely reinitialize the system.
+                        rebooting = false;
                         break;
                     case 4:
                         // Soft shutdown: Reset and do not reboot system
@@ -954,12 +957,14 @@ let errno;
                         create_devfs();
                         rootfs_build();
                         create_init();
+                        rebooting = false;
                         break;
                     case 8:
                         // Kernel stasis: keep kernel alive with no processes (including no init)
                         kdebug("Entering kernel stasis...");
                         reset();
                         unmount_all();
+                        rebooting = false;
                         break;
                     case 9:
                         // Panic reboot
@@ -967,11 +972,11 @@ let errno;
                         stop_kernel();
                         dirty_purge();
                         kernel_entry(kargs);
+                        rebooting = false;
                         break;
                     default:
                         throw new Error("opcode invalid");
                 }
-                rebooting = false;
             } else {
                 kwarn("Cannot execute reboot: reboot in progress.");
             }
