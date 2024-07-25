@@ -79,8 +79,11 @@ class JFS {
     }
     stringify() {
         let inodes = [];
-        for(let inode of this.inodes)
-            inodes.push(inode.stringify());
+        for(let i = 0; i < this.inodes.length; i++) {
+            let inode = this.inodes[i];
+            if(!inode) continue;
+            inodes[i] = inode.stringify();
+        }
         return JSON.stringify({
             inodes: inodes,
             casefold: this.casefold,
@@ -92,8 +95,11 @@ class JFS {
         let obj = JSON.parse(string);
         if(obj.magic !== 20) throw new Error("Parsing filesystem failed: magic number incorrect (" + obj.magic + " instead of 20)");
         let inodes = [];
-        for(let inode_string of obj.inodes)
-            inodes.push(inode_parse(inode_string))
+        for(let i = 0; i < obj.inodes.length; i++) {
+            let inode_string = obj.inodes[i];
+            if(!inode_string) continue;
+            inodes[i] = inode_parse(inode_string);
+        }
         this.inodes = inodes;
         this.casefold = obj.casefold;
         this.magic = obj.magic;
