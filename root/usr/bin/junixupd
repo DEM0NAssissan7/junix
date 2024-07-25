@@ -9,6 +9,8 @@ this.main = function(args) {
         umount(upd_mnt);
         printf("Deleting update device...\n");
         unlink(upd_dev);
+        printf("Syncing update changes...\n");
+        sync();
         printf("\n\nUpdate complete!\n");
         exit();
     }
