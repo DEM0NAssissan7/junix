@@ -14,10 +14,10 @@ this.main = function(args) {
     }
     let update_path = args;
     if(args.length === 0) {
-        printf("Using default update path (" + default_update_path + ")\n\n");
+        printf("Using default update path (" + default_update_path + ")\n");
         update_path = default_update_path
     }
-    printf("Running JUNIX system update...\n");
+    printf("Running JUNIX system update...\n\n");
     printf("Extracting filesystem from update file.\n");
     let fd = fopen(update_path, "r");
     let string = read(fd);
