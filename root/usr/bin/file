@@ -18,9 +18,8 @@ function get_file_type(path) {
         case "object":
             if(data.magic === 20)
                 return "filesystem";
-        default:
-            return result;
     }
+    return result;
 }
 this.main = function(path) {
     printf(dirname(path) + ": " + get_file_type(path) + "\n");

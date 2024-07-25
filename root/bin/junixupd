@@ -1,0 +1,47 @@
+const upd_dev = "/dev/updfs";
+const upd_mnt = "/mnt/update";
+const default_update_path = "/dev/jupd";
+let completed = false;
+this.main = function(args) {
+    if(completed) {
+        printf("\nFiles successfully copied!\n")
+        printf("Unmounting update filesystem...\n")
+        umount(upd_mnt);
+        printf("Deleting update device...\n");
+        unlink(upd_dev);
+        printf("\n\nUpdate complete!\n");
+        exit();
+    }
+    let update_path = args;
+    if(args.length === 0) {
+        printf("Using default update path (" + default_update_path + ")\n\n");
+        update_path = default_update_path
+    }
+    printf("Running JUNIX system update...\n");
+    printf("Extracting filesystem from update file.\n");
+    let fd = fopen(update_path, "r");
+    let string = read(fd);
+    let fs = new JFS();
+    if(typeof string !== "object")
+        fs.parse(string);
+    else
+        fs = string;
+    fclose(fd);
+
+    printf("\nCreating update filesystem device\n");
+    fd = fopen(upd_dev, "w");
+    write(fd, fs);
+    fclose(fd);
+    
+    printf("\nMounting update image\n");
+    if(!access(upd_mnt))
+        mkdir(upd_mnt);
+    mount(upd_dev, upd_mnt);
+
+    printf("Copying update files to the rest of the system using cp\n");
+    fork(() => {
+        exec("/bin/cp", "-r " + upd_mnt + " /");
+    });
+    completed = true;
+    wait();
+}

@@ -1,13 +1,15 @@
 function inode_parse(string) {
     let obj = JSON.parse(string);
     let data = obj.data;
-    if(obj.data_type === "function")
-        data = (new Function("return function(){" + obj.data + "}"))();
-    return new Inode(obj.index, obj.filename, data, obj.type, obj.user, obj.mode);
+    if(obj.data_type === "function") {
+        data = (new Function("return " + obj.data + ""))();
+    }
+    return new Inode(obj.index, obj.parent_index, obj.filename, data, obj.type, obj.user, obj.mode);
 }
 class Inode {
-    constructor(index, filename, data, type, user, mode) {
+    constructor(index, parent_index, filename, data, type, user, mode) {
         this.index = index;
+        this.parent_index = parent_index;
         this.data = data;
         this.filename = filename;
         if(filename.length === 0) throw new Error("Invalid inode file name");
@@ -47,24 +49,25 @@ class Inode {
     }
     stringify() {
         let data = this.data;
-        if(typeof this.data === "function")
+        let data_type = typeof this.data;
+        if(data_type === "function")
             data = data.toString();
         return JSON.stringify({
             index: this.index,
             filename: this.filename,
-            data: this.data,
-            data_type: typeof this.data,
+            data: data,
+            data_type: data_type,
             type: this.type,
             user: this.user,
-            mode: this.mode
+            mode: this.mode,
+            parent_index: this.parent_index
         });
     }
 }
 
 class JFS {
     constructor (options) {
-        this.inodes = [new Inode(0, "/", [], "d", 0, 111)];
-        this.indexes = 1;
+        this.inodes = [new Inode(0, null, "/", [], "d", 0, 111)];
         this.mountpoint = false;
         this.casefold = true;
         if(options) {
@@ -80,7 +83,6 @@ class JFS {
             inodes.push(inode.stringify());
         return JSON.stringify({
             inodes: inodes,
-            indexes: this.indexes,
             casefold: this.casefold,
             magic: 20,
             uuid: this.uuid
@@ -93,17 +95,32 @@ class JFS {
         for(let inode_string of obj.inodes)
             inodes.push(inode_parse(inode_string))
         this.inodes = inodes;
-        this.indexes = obj.indexes;
         this.casefold = obj.casefold;
         this.magic = obj.magic;
         this.uuid = obj.uuid;
     }
     create_file(parent_index, filename, data, type, user, mode) {
         let parent_inode = this.get_inode(parent_index);
-        let inode = new Inode(this.indexes, filename, data, type, user, mode);
-        this.inodes.push(inode);
-        parent_inode.add_directory_entry(this.indexes++);
+        let index = this.inodes.length;
+        for(let i = 1; i < this.inodes.length; i++) {
+            if(!this.inodes[i]) {
+                index = i;
+                break;
+            }
+        }
+        let inode = new Inode(index, parent_index, filename, data, type, user, mode);
+        console.log(inode.parent_index);
+        this.inodes[index] = inode;
+        parent_inode.add_directory_entry(index);
         return inode;
+    }
+    delete_file(index) {
+        // Remove inode reference from parent
+        let inode = this.get_inode(index);
+        let parent_inode = this.get_inode(inode.parent_index);
+        parent_inode.remove_directory_entry(index);
+        // Unlink from FS tree
+        this.inodes[index] = undefined;
     }
     get_inode(index) {
         let inode = this.inodes[index];

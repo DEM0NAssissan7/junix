@@ -13,3 +13,8 @@ function fgetc() {
     if(string.length > 0) return string;
     return false;
 }
+function system(command, args) {
+    fork(() => {
+        exec(command, args);
+    });
+}
