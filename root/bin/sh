@@ -85,7 +85,7 @@ function tab_completion(verb, find_commands) {
             let path = "";
             for(let e of _path) {
                 if(e === ".") continue;
-                path += e;
+                path += e + "/";
             }
             test_completion_match(candidates, dirname(path), _verb[_verb.length - 1]);
         } catch (e) {
