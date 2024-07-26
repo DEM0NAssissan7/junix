@@ -1,36 +1,57 @@
 // JUNIX Init system: inspired by FreeBSD rc
-let fd;
+let fd, loginconf;
 let pid;
+let started = false;
 this.main = () => {
     if(getpid() !== 1) {
         fprintf(stderr, "init can only run on PID 1\n");
         exit();
     }
+    if(!started) {
+        // Clear old logs
+        fd = fopen("/var/log/init", "w");
+        write(fd, "");
+        fclose(fd);
 
-    fd = fopen("/etc/services", "r");
-    let paths = read(fd).split("\n");
-    for(let path of paths)
-        start(path);
-    fclose(fd);
-    fclose(stdio);
-    fclose(stdin);
-    fclose(stderr);
+        fopen("/dev/null", "w") // Stdin
+        fopen("/var/log/init", "a"); // Stdout
+        dup(stdout); // Stderr
 
-    pid = thread(post_driver);
-    sleep(-1);
+        fd = fopen("/etc/login.conf", "r");
+        loginconf = read(fd);
+        fclose(fd);
+
+        fd = fopen("/etc/services", "r");
+        let paths = read(fd).split("\n");
+        fclose(fd);
+        for(let path of paths)
+            start(path);
+        fclose(stdin);
+        fclose(stdout);
+        fclose(stderr);
+    
+        pid = thread(post_driver);
+        started = true;
+        sleep(-1);
+    } else {
+        fprintf(stderr, "Running init after starting: something is going on.");
+    }
 }
 let wait = false;
+let finished = false;
 function post_driver() {
     if(!wait) { // Allow the drivers to initialize before starting /etc/rc
         wait = true;
         return;
     }
-    // Create stdin, stdio, and stderr
+    if(finished) return;
+    console.log("Running post driver-init");
+    // Create stdin, stdout, and stderr
     fopen("/dev/keyboard", "r"); // Stdin
-    fopen("/dev/console", "a"); // Stdio
-    dup(stdio); // Stderr
+    fopen("/dev/console", "a"); // Stdout 
+    dup(stdout); // Stderr
 
-    fd = fopen("/etc/os-release", "r")
+    fd = fopen("/etc/os-release", "r");
     let deftable = map_variables(read(fd));
     printf(get_variable_value("NAME", deftable) + " " +
             get_variable_value("MAJOR_VERSION", deftable) +
@@ -39,21 +60,24 @@ function post_driver() {
 
     printf("Starting /etc/rc\n");
     fd = fopen("/etc/rc", "r");
-    paths = read(fd).split("\n");
-    for(let path of paths)
-        start(path);
+    let paths = read(fd).split("\n");
+    fclose(fd);
+    let c;
+    for(let command of paths) {
+        c = parse_command(command);
+        start(c.cmd, c.args);
+    }
     printf("\n\n");
 
     cancel(pid);
+    wait = true;
+    finished = true;
 }
-function start (path) {
+function start (path, args) {
     printf("Starting " + path)
-    console.log("starting " + path)
+    console.log("starting " + path);
     fork(() => {
-        fclose(fd);
-        let _fd = fopen("/etc/login.conf", "r");
-        exec(path, "", map_variables(read(_fd)));
-        fclose(_fd);
         printf(" [" + getpid() + "]\n");
+        exec(path, args, map_variables(loginconf));
     });
 }

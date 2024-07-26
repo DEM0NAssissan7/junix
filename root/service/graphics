@@ -27,6 +27,7 @@ this.main = function() {
 function init_console () {
     console_element = document.getElementById("console");
     console_fd = fopen(console_device, "w");
+    printf("Initialized console\n");
 }
 function update_console() {
     let string = read(console_fd);
@@ -60,6 +61,7 @@ function init_framebuffer() {
     framebuff_fd = fopen(framebuffer_device, "w");
     let fd = fopen(ctx_device, "w");
     write(fd, ctx);
+    printf("Initialized framebuffer\n");
 }
 function check_mode () {
     let input = read(framebuff_fd);
@@ -97,4 +99,5 @@ function init_window() {
     window.onresize = e => {
         update_window();
     };
+    printf("Initialized window device\n");
 }

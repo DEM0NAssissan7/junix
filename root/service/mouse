@@ -10,6 +10,7 @@ let mouse = {
 this.main = function() {
     if(!init) {
         fd = fopen("/dev/mouse", "w");
+        printf("Created /dev/mouse device\n");
         init = true;
     }
     if(mouse_moved) {

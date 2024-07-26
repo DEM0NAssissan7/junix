@@ -1,7 +1,6 @@
 this.main = function(args) {
-    let args_map = args.split(" ");
-    let device = args_map[0];
-    let mountpoint = args_map[1];
+    let device = args[0];
+    let mountpoint = args[1];
     mount(device, mountpoint);
     exit();
 }

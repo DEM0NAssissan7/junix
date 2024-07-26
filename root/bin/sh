@@ -1,12 +1,12 @@
 let buffer = "";
 let previous_buffers = [];
-let seeker_index = 0;
+let seeker_index = -1;
 let prompt = "#";
 const cursor_char = "_";
 let paths = [];
 let env;
 let executed = false;
-const version_string = "sh 1.0"
+const version_string = "sh 1.1"
 let init = false;
 let condition_met = true;
 this.main = function(args, envp) {
@@ -97,6 +97,16 @@ function tab_completion(verb, find_commands) {
     return candidates;
 }
 
+function clear_buffer() {
+    for(let i = 0; i < buffer.length; i++)
+        printf("\b");
+}
+function seek() {
+    clear_buffer();
+    buffer = previous_buffers[seeker_index];
+    printf(buffer);
+}
+
 function add_to_buffer(b) {
     printf('\b'); // Clear old cursor
     let command_ran = false;
@@ -113,9 +123,9 @@ function add_to_buffer(b) {
             case '\n':
                 printf('\n')
                 command_ran = true;
-                seeker_index = 0;
+                seeker_index = -1;
                 if(buffer.length > 0) {
-                    previous_buffers.push(buffer);
+                    previous_buffers.splice(0, 0, buffer);
                     parse_input(buffer);
                     break;
                 }
@@ -131,8 +141,7 @@ function add_to_buffer(b) {
                     break;
                 if(candidates.length === 1) {
                     // Clear buffer from print
-                    for(let i = 0; i < buffer.length; i++)
-                        printf("\b");
+                    clear_buffer();
                     buffer = buffer.substring(0, buffer.length - verb_paths[verb_paths.length - 1].length);
                     let complete = candidates[0];
                     buffer += complete;
@@ -145,7 +154,16 @@ function add_to_buffer(b) {
                 }
                 break;
             case '\x00': // Up arrow
-                printf("HELLO WORLD")
+                if(seeker_index < previous_buffers.length - 1) {
+                    seeker_index++;
+                    seek();
+                }
+                break;
+            case '\x02': // Down arrow
+                if(seeker_index > 0) {
+                    seeker_index--;
+                    seek();
+                }
                 break;
             default:
                 printf(a)
@@ -174,21 +192,36 @@ let internal_commands = [
         printf('\?');
     }],
     ["cd", (args) => {
-        chdir(args);
+        chdir(args[0]);
     }],
     ["pwd", () => {
         printf(getcwd() + "\n");
     }],
     ["echo", (args) => {
-        printf(args + "\n");
+        for(let arg of args) {
+            printf(arg + " ");
+        }
+        printf("\n");
     }],
     ["which", (args) => {
-        let path = find_path(args);
-        if(path === "") {
-            printf("'" + args + "' was not found\n");
-            return;
+        for(let arg of args) {
+            let path = find_path(arg);
+            if(path === "") {
+                printf("'" + arg + "' was not found\n");
+                continue;
+            }
+            printf(path + "/" + arg + "\n");
         }
-        printf(path + "/" + args + "\n");
+    }],
+    ["exec", (args) => {
+        let _args = args.toSpliced(0, 1);
+        let cmd = args[0];
+        let path = find_path(cmd);
+        if(path === "") {
+            exec(cmd, _args, env);
+        } else {
+            exec(path + "/" + cmd, _args, env);
+        }
     }]
 ]
 function run_script(string) {
@@ -244,7 +277,11 @@ function parse_input(buffer) {
 }
 let command_queue = [];
 function queue(command, args, conditional) {
-    command_queue.push([command, args, conditional]);
+    try {
+        command_queue.push([command, parse_arguments(args), conditional]);
+    } catch (e) {
+        fprintf(stderr, e);
+    }
 }
 function run_queue() {
     if(command_queue.length !== 0) {

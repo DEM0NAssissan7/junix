@@ -2,6 +2,7 @@ const upd_dev = "/dev/updfs";
 const upd_mnt = "/mnt/update";
 const default_update_path = "/dev/jupd";
 let completed = false;
+let quiet = false;
 this.main = function(args) {
     if(completed) {
         printf("\nFiles successfully copied!\n")
@@ -14,10 +15,20 @@ this.main = function(args) {
         printf("\n\nUpdate complete!\n");
         exit();
     }
-    let update_path = args;
-    if(args.length === 0) {
-        printf("Using default update path (" + default_update_path + ")\n");
-        update_path = default_update_path
+    let update_path = default_update_path
+    for(let arg of args) {
+        switch(arg) {
+            case "-q":
+            case "--quiet":
+                quiet = true;
+                continue;
+        }
+        update_path = arg;
+        break;
+    }
+    if(quiet) {
+        fclose(stdout);
+        fopen("/dev/null", "w");
     }
     printf("Running JUNIX system update...\n\n");
     printf("Extracting filesystem from update file.\n");
@@ -42,7 +53,7 @@ this.main = function(args) {
 
     printf("Copying update files to the rest of the system using cp\n");
     fork(() => {
-        exec("/bin/cp", "-r " + upd_mnt + " /");
+        exec("/bin/cp", ["-r", upd_mnt, "/"]);
     });
     completed = true;
     wait();

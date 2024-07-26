@@ -1,12 +1,13 @@
 const stdin = 0;
-const stdio = 1;
+const stdout = 1;
+const stdio = stdout;
 const stderr = 2;
 function fprintf(fd, message) {
     write(fd, message);
 }
 function printf(...messages) {
     for(let message of messages)
-        fprintf(stdio, message);
+        fprintf(stdout, message);
 }
 function fgetc() {
     let string = read(fd);

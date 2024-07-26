@@ -64,6 +64,7 @@ var root_fs;
 /* System Managment */
 
 var reboot; // Manipulate system power state
+var sysinfo; // View system statistics
 
 /* Kernel Code */
 
@@ -76,11 +77,16 @@ let errno;
             throw new Error("Cannot execute kernel: already entered.");
         entered = true;
 
+        const enter_time = get_time(0);
+        function get_uptime() {
+            return get_time(0) - enter_time;
+        }
+
         // Logging
         const print_klog = true;
         let klog = [];
         let create_log_entry = function (message, severity) {
-            let time = get_time();
+            let time = get_uptime();
             klog.push({
                 message: message,
                 time: time,
@@ -127,6 +133,20 @@ let errno;
         // Kernel Arguments
         if (!kargs)
             kwarn("No kernel arguments specified. Running kernel headless.");
+
+        // Systemcall management
+        let system_time = 0;
+        function syscall(callback) {
+            return function (...args) {
+                return run_syscall(() => callback(...args));
+            }
+        }
+        function run_syscall(callback) {
+            let time = get_time(3);
+            let retval = callback();
+            user_time -= get_time(3) - time;
+            return retval;
+        }
 
         // Descriptors
         class FileDescriptor {
@@ -183,7 +203,7 @@ let errno;
                     this.inode.write(this.buffer);
             }
         }
-        fopen = function (path, flags, mode) {
+        fopen = syscall(function (path, flags, mode) {
             // Create and return a file descriptor for a file
             if (!path) throw new Error("You must specify a path");
             if (!flags) throw new Error("No flags specified");
@@ -198,11 +218,11 @@ let errno;
 
             let descriptor = new FileDescriptor(inode.get_data(), flags, inode.mode, c_user, inode, file.filesystem);
             return c_process.create_descriptor(descriptor);
-        }
-        read = function (fd) {
+        });
+        read = syscall(function (fd) {
             return c_process.get_descriptor(fd).read();
-        }
-        write = function (fd, data) {
+        });
+        write = syscall(function (fd, data) {
             let descriptor = c_process.get_descriptor(fd);
             switch (descriptor.flags) {
                 case 'r':
@@ -214,52 +234,52 @@ let errno;
                     descriptor.append(data);
                     break;
             }
-        }
-        access = function (path) {
+        });
+        access = syscall(function (path) {
             return !(get_file(path).incomplete);
-        }
-        dup = function (fd) {
+        });
+        dup = syscall(function (fd) {
             c_process.duplicate(fd);
-        }
-        fclose = function (fd) {
+        });
+        fclose = syscall(function (fd) {
             let descriptor = c_process.get_descriptor(fd);
-            descriptor.flush();
+            // descriptor.flush();
             c_process.close(fd);
-        }
-        stat = function (path) {
+        });
+        stat = syscall(function (path) {
             let inode = get_file(path).inode;
             return {
                 type: inode.type,
                 user: inode.user,
             }
-        }
-        unlink = function(path) {
+        });
+        unlink = syscall(function (path) {
             let f = get_file(path);
-            if(f.inode.type !== "-") throw new Error("Cannot unlink a non-normal file.");
+            if (f.inode.type !== "-") throw new Error("Cannot unlink a non-normal file.");
             f.filesystem.delete_file(f.inode.index);
-        }
-        mkdir = function (path) {
+        });
+        mkdir = syscall(function (path) {
             let file = get_file(path);
             if (file.incomplete)
                 file.filesystem.create_file(file.inode.index, get_filename(path), [], "d", c_user, file.inode.mode);
-        }
-        opendir = function (path) {
+        });
+        opendir = syscall(function (path) {
             let file = get_file(path);
             if (file.incomplete) throw new Error("Directory " + path + " does not exist");
             if (file.inode.type !== "d") throw new Error("opendir() failed: not a directory [" + path + "]");
             let descriptor = new FileDescriptor(file.inode.get_data(), "r", 755, c_user, file.inode, file.filesystem);
             return c_process.create_descriptor(descriptor);
-        }
-        listdir = function (fd) {
+        });
+        listdir = syscall(function (fd) {
             return c_process.get_descriptor(fd).listdir();
-        }
-        closedir = function (fd) {
+        });
+        closedir = syscall(function (fd) {
             let descriptor = c_process.get_descriptor(fd);
             c_process.close(descriptor);
-        }
-        dirname = function (path) {
+        });
+        dirname = syscall(function (path) {
             return full_path(path);
-        }
+        });
 
         // Mounting
         let mount_table = [];
@@ -280,13 +300,13 @@ let errno;
             filesystem.mount(mount_table.length, file.inode);
             mount_table.push(filesystem);
         }
-        mount = function (device, path) {
+        mount = syscall(function (device, path) {
             let file = get_file(device);
             if (file.incomplete) throw new Error("Device does not exist at " + device)
             let fs = file.inode.get_data();
             mount_fs(fs, path);
             kdebug("Device " + full_path(device) + " mounted at " + full_path(path));
-        }
+        });
         function is_busy(filesystem) {
             if (filesystem.fds > 0) return true;
             return false;
@@ -310,7 +330,7 @@ let errno;
                 if (fs && typeof fs === "object")
                     unmount_fs(fs);
         }
-        umount = function (path) {
+        umount = syscall(function (path) {
             let file = get_file(path);
             if (file.incomplete) throw new Error("File does not exist at " + path);
             let filesystem;
@@ -321,19 +341,19 @@ let errno;
                 filesystem = file.inode.get_data();
             unmount_fs(filesystem);
             return 0;
-        }
-        sync = function () {
+        });
+        sync = syscall(function () {
             for (let fs of mount_table) {
                 if (!fs) continue;
                 fs.sync();
             }
-        }
+        });
 
         // Kernel file tools
         let full_path_dirty = function (path) {
             let working_path = "";
             if (c_process) {
-                if(path[0] !== "/")
+                if (path[0] !== "/")
                     working_path = c_process.working_path;
             }
             return working_path + "/" + path;
@@ -391,6 +411,7 @@ let errno;
         // Process
         let processes = [];
         let pids = 1;
+        let user_time = 0;
         let c_process, c_user;
         class Thread {
             constructor(process, exec, pid, args) {
@@ -414,16 +435,16 @@ let errno;
                 return this.is_ready(time);
             }
             run() {
-                this.exec(...this.args);
+                let time = track_time(() => {
+                    this.exec(...this.args);
+                });
+                this.process.exec_time += time;
+                user_time += time;
             }
         }
         class Process {
             constructor(code_object, user, working_path) {
-                this.descriptor_table = [
-                    new FileDescriptor("", "w", 777, 0),
-                    new FileDescriptor("", "w", 777, 0),
-                    new FileDescriptor("", "w", 777, 0)
-                ];
+                this.descriptor_table = [];
 
                 this.cmdline = null;
                 this.command = null;
@@ -442,9 +463,7 @@ let errno;
                 this.threads = [];
                 this.add_thread(this.code.main, []);
 
-                this.code_table = [
-                    //0
-                ]
+                this.exec_time = 0;
             }
             exec(code, args, path) {
                 this.code = code; // Replace process code object with exec
@@ -587,13 +606,13 @@ let errno;
             for (let process of processes)
                 if (process.pid === pid) return process;
         }
-        getpid = function () {
+        getpid = syscall(function () {
             return c_process.pid;
-        }
-        getuid = function () {
+        });
+        getuid = syscall(function () {
             return c_process.user;
-        }
-        fork = function (intermediate_code) {
+        });
+        fork = syscall(function (intermediate_code) {
             if (!c_process) panic("Fork was run outside of kernel context");
             let process = c_process.clone(intermediate_code);
             if (process)
@@ -601,57 +620,57 @@ let errno;
             else
                 return -1;
             return process.pid;
-        }
-        wait = function () {
+        });
+        wait = syscall(function () {
             if (!c_process) panic("wait() was run outside of kernel context");
             if (c_process.children.length !== 0)
                 c_process.waiting = true;
             interrupt();
-        }
-        exec = function (path, ...args) {
+        });
+        exec = syscall(function (path, ...args) {
             let file = get_file(path);
             if (file.incomplete) throw new Error("File at " + path + " does not exist.");
             let code_object = file.inode.get_data();
             let code = new code_object();
             c_process.exec(code, args ?? [], full_path(path));
-        }
-        thread = function (exec, args) {
+        });
+        thread = syscall(function (exec, args) {
             return c_process.add_thread(exec, args);
-        }
-        cancel = function (pid) {
+        });
+        cancel = syscall(function (pid) {
             c_process.cancel_thread(pid);
-        }
-        sleep = function (time) {
+        });
+        sleep = syscall(function (time) {
             c_thread.sleep = time;
-        }
-        exit = function () {
+        });
+        exit = syscall(function () {
             c_process.kill();
             interrupt();
-        }
-        kill = function (pid, sig) {
+        });
+        kill = syscall(function (pid, sig) {
             let process = get_process(pid)
             if (!process) throw new Error("No process with PID " + pid);
             process.signal(sig);
-        }
-        getppid = function () {
+        });
+        getppid = syscall(function () {
             let parent = c_process.parent;
             if (!parent) throw new Error("Process does not have a parent.")
             return parent.pid;
-        }
-        chdir = function (path) {
+        });
+        chdir = syscall(function (path) {
             let new_working_path = full_path(path);
             if (!access(new_working_path))
                 throw new Error(new_working_path + " does not exist.");
             return c_process.working_path = new_working_path;
-        }
-        getcwd = function () {
+        });
+        getcwd = syscall(function () {
             return c_process.working_path;
-        }
+        });
 
         // Scheduler
         const max_proc_time = 100;
         let threads = [];
-        let scheduler = function () {
+        function scheduler () {
             const sched_start_time = get_time(3);
             // Load ready threads into buffer
             for (let i = 0; i < processes.length; i++) {
@@ -671,7 +690,10 @@ let errno;
                     continue;
                 }
             }
+            // Calculate load average
+            count_processes_load(sched_start_time);
             // Run all queued threads
+            user_time = 0;
             while (threads.length > 0) {
                 let thread = threads[0];
                 c_process = thread.process;
@@ -742,7 +764,7 @@ let errno;
             filesystem.mount(0, "/");
             mount_table[0] = filesystem;
         }
-        let mount_root_device = function(device) {
+        let mount_root_device = function (device) {
             let file = get_file(device);
             if (file.incomplete) throw new Error("Device does not exist at " + device)
             let fs = file.inode.get_data();
@@ -769,7 +791,7 @@ let errno;
         let create_devfs = function () {
             devfs = new JFS();
             mount_fs(devfs, "/dev");
-            for(let d of device_pointers)
+            for (let d of device_pointers)
                 devfs.create_file(0, d.name, d.device, "-", 0, 511);
         }
         mkdir("/dev"); // Create a temporary /dev
@@ -777,41 +799,41 @@ let errno;
 
         // Disk drivers
 
+        /* Disk driver: add disks */
+        {
+            let disks = 0;
+            function add_disk(filesystem) {
+                create_device_pointer(filesystem, "disk" + disks++);
+            }
+        }
+
         /* Localstorage driver: Allow mounting root from local storage */
         function localstorage_driver() {
             kdebug("Starting localstorage driver");
             let string = localStorage.getItem("root");
             let fs = new JFS();
-            create_device_pointer(fs, "disk0");
+            add_disk(fs);
             create_junix_update_file();
-            if(string === null) {
-                if(kargs.initfs_table) {
+            if (string === null) {
+                if (kargs.initfs_table) {
                     kwarn("Populating localstorage with initfs table");
-                    rootfs_build();
+                    rootfs_build(false);
                     string = mount_table[0].stringify();
                 } else {
                     panic("Cannot boot: localstorage driver failed to get 'root' from browser data. There was no fallback initfs table.");
                 }
             }
             fs.parse(string);
-            fs.sync = function() {
+            fs.sync = function () {
                 localStorage.setItem("root", fs.stringify());
             }
         }
         if (kargs.use_localstorage_driver)
             localstorage_driver();
 
-        // Initfs
-        if (kargs.initfs_table && kargs.use_initfs_only)
-            create_device_pointer(mount_table[0], "disk0");
-
-        // Create /dev and all device pointers
-        create_devfs();
-
         // Root mounting
-        /* 'rootfs_build' driver
-        This should be the only driver that runs in kernel-mode */
-        function rootfs_build() {
+        /* 'rootfs_build' driver */
+        function rootfs_build(create_device) {
             kdebug("Building root filesystem from fs definition table");
             let table = kargs.initfs_table;
             for (let entry of table) {
@@ -821,6 +843,9 @@ let errno;
                     let file = get_file(entry[0]);
                     mount_table[0].create_file(file.inode.index, get_filename(entry[0]), entry[1], "-", 0, 711);
                 }
+            }
+            if (create_device) {
+                add_disk(mount_table[0]);
             }
         }
         function create_junix_update_file() {
@@ -840,13 +865,15 @@ let errno;
             mount_table[0] = old_fs;
         }
         if (kargs.initfs_table && !kargs.root || kargs.use_initfs_only) {
-            rootfs_build();
-        } else if (kargs.root) {
+            rootfs_build(true);
+        }
+        create_devfs(); // Create /dev filesystem
+        if (kargs.root && !kargs.use_initfs_only) {
             kdebug("Mounting root from device map");
             mount_root_device(kargs.root);
             unmount_fs(devfs);
             mount_fs(devfs, "/dev");
-        } else {
+        } else if (!kargs.initfs_table) {
             kwarn("Kernel running headless. Tmpfs being used for root.");
         }
 
@@ -897,6 +924,7 @@ let errno;
             kwarn("Running dirty purge: all runtime kernel data will be completley lost");
             purge();
             for (let filesystem of mount_table) {
+                if(!filesystem) continue;
                 filesystem.fds = 0;
                 filesystem.mountpoint = false;
                 filesystem.parent_inode = null;
@@ -904,14 +932,16 @@ let errno;
             }
             mount_table = [];
         }
+        let stopped = false;
         function stop_kernel() {
             clearTimeout(kernel_timeout_id);
             loop_timeout = Infinity; // Prevent further execution
             entered = false; // Open the kernel to re-entry
+            stopped = true;
         }
         let rebooting = false;
-        reboot = function (op) {
-            if(!rebooting) {
+        reboot = syscall(function (op) {
+            if (!rebooting) {
                 rebooting = true;
                 switch (op) {
                     case 2: // Change op to be accurate to actual UNIX
@@ -955,7 +985,7 @@ let errno;
                         create_init_rootfs();
                         mkdir("/dev");
                         create_devfs();
-                        rootfs_build();
+                        rootfs_build(true);
                         create_init();
                         rebooting = false;
                         break;
@@ -969,6 +999,7 @@ let errno;
                     case 9:
                         // Panic reboot
                         kdebug("Rebooting from panic");
+                        panic = () => {};
                         stop_kernel();
                         dirty_purge();
                         kernel_entry(kargs);
@@ -980,9 +1011,57 @@ let errno;
             } else {
                 kwarn("Cannot execute reboot: reboot in progress.");
             }
+        });
+        sysinfo = syscall(function() {
+            return {
+                loads: loadavg,
+                total_time: total_time,
+                user_time: user_time,
+                system_time: system_time,
+                uptime: round(get_uptime()/1000),
+                procs: processes.length,
+
+            }
+        })
+
+        // Usage counters
+        let loadavg = [0, 0, 0];
+        function track_time(handler) {
+            let time = get_time(3);
+            handler();
+            return get_time(3) - time;
+        }
+        {
+            /* Based on Linux kernel source code */
+            const EXP_1 = 0.9200 /* 1/exp(5sec/1min) as fixed-point */
+            const EXP_5 = 0.9835 /* 1/exp(5sec/5min) */
+            const EXP_15 = 0.9945 /* 1/exp(5sec/15min) */
+            function calc_load(_load, exp, n) {
+                let load = _load;
+                load *= exp;
+                load += n * (1 - exp);
+                return round(load, 2);
+            }
+            let last_counted = get_time(0);
+            let count = 0;
+            let times_run = 0;
+            function count_processes_load(time) {
+                count+=threads.length;
+                times_run++;
+                if(time - last_counted >= 5000) {
+                    const active_tasks = count / times_run;
+                    loadavg[0] = calc_load(loadavg[0], EXP_1, active_tasks);
+                    loadavg[1] = calc_load(loadavg[1], EXP_5, active_tasks);
+                    loadavg[2] = calc_load(loadavg[2], EXP_15, active_tasks);
+                    last_counted = time;
+                    count = 0;
+                    times_run = 0;
+                }
+            }
         }
 
         // Execution loop
+        let total_time = 0;
         kdebug("Beginning execution loop");
         let kernel_main = () => {
             try {
@@ -995,8 +1074,15 @@ let errno;
         }
         let kernel_timeout_id;
         let kernel_loop = () => {
-            kernel_main();
+            if(stopped) {
+                kerror("There was an attempt to run the kernel while stopped.");
+                return;
+            }
+            let time = get_time(3);
+            total_time = track_time(kernel_main);
             kernel_timeout_id = setTimeout(kernel_loop, loop_timeout);
+            total_time = get_time(3) - time;
+            system_time = total_time - user_time;
         }
         kernel_loop(); // Start execution
     }

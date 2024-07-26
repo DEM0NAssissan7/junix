@@ -8,6 +8,7 @@ function keyupdate() {
 this.main = function() {
     fd = fopen("/dev/keyboard", "w", 777);
     thread(keyupdate, []);
+    printf("Created keyboard driver\n");
     sleep(-1);
 }
 

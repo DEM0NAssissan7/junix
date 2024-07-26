@@ -1,5 +1,5 @@
 this.main = function(args) {
-    console.log(args);
-    mkdir(args);
+    for(let arg of args)
+        mkdir(arg);
     exit();
 }

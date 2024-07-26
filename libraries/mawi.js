@@ -13,16 +13,34 @@ function deep_obj(object) {
     // return object;
 }
 
+function raise_ten_to(a) {
+    switch(a) { // Precalculated results to minimize overhead
+        case 0:
+            return 1;
+        case 1:
+            return 10;
+        case 2:
+            return 100;
+        case 3:
+            return 1000;
+        case 4:
+            return 10000;
+        case 5:
+            return 100000;
+        default:
+            return Math.pow(10, a);
+    }
+}
+
 function round(number, accuracy) {
-    let _a = Math.pow(10, accuracy);
+    let _a = raise_ten_to(accuracy ?? 0);
     return Math.round(number * _a) / _a;
 }
 
 {
     let time = performance.now();
     function get_time(accuracy) {
-        let a = accuracy ?? 1;
-        return Math.round((performance.now() - time) * a) / a;
+        return round(performance.now() - time, accuracy ?? 0);
     }
 }
 let map_path_names = function (path) {
@@ -187,6 +205,72 @@ function map_options(args) {
 }
 
 function random(min, max, accuracy) {
-    let digits = Math.pow(10, accuracy ?? 0);
+    let digits = raise_ten_to(accuracy ?? 0);
     return Math.floor(((Math.random() * max) * digits) / digits) + min
+}
+function byteSize (str) {
+    return new Blob([str]).size;
+}
+
+function parse_arguments(string) {
+    let args = [];
+    let token = "";
+    let double_quote = false;
+    let c;
+    for(let i = 0; i < string.length; i++) {
+        c = string[i];
+        let add_char = () => {
+            token += c;
+        }
+        switch (c) {
+            case '"':
+                if(!double_quote)
+                    double_quote = true;
+                if(double_quote)
+                    double_quote = false;
+                break;
+            case ' ':
+                if(double_quote){
+                    add_char();
+                    break;
+                }
+                if(token.length !== 0) {
+                    args.push(token);
+                    token = "";
+                    break;
+                }
+            default:
+                add_char();
+                break;
+        }
+        if(i === string.length - 1) {
+            // When the arguments have ended
+            if(double_quote)
+                throw new Error('Unterminated double quote');
+            if(token.length !== 0)
+                args.push(token);
+        }
+    }
+    return args;
+}
+function parse_command(string) {
+    let cmd = string;
+    let split_point = string.indexOf(" ");
+    let args = [];
+    if(split_point !== -1) {
+        let arguments = string.substring(split_point + 1, string.length);
+        args = parse_arguments(arguments);
+        cmd = string.substring(0, split_point);
+    }
+    return {
+        cmd: cmd,
+        args: args
+    }
+}
+function factory_reset_system() {
+    console.warn("Running factory reset...");
+    console.warn("Clearing local storage...");
+    localStorage.clear();
+    console.warn("Panic rebooting...");
+    reboot(9);
 }

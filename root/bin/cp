@@ -1,8 +1,7 @@
 let recursive = false;
 let src, dest;
 
-this.main = function(_args) {
-    let args = _args.split(" ");
+this.main = function(args) {
     for(let arg of args) {
         switch(arg) {
             case "-r":

@@ -5,9 +5,10 @@ let filename = "";
 let dir = "";
 let filetype;
 this.main = function(args) {
-    filename = get_filename(args);
-    dir = dirname(args);
-    let fd = fopen(args, "w");
+    let path = args[0];
+    filename = get_filename(path);
+    dir = dirname(path);
+    let fd = fopen(path, "w");
     buffer = read(fd);
     filetype = typeof buffer;
     if(filetype !== "string") {
@@ -53,6 +54,33 @@ function write_changes() {
     fclose(fd);
     printf("\nWrote changes to " + dir + "...\n");
 }
+function move_vertically(up) {
+    if(up) {
+        let sub_beg = buffer.substring(0, cursor);
+        let sub_end = buffer.substring(cursor, buffer.length);
+        let hor_offset = cursor - sub_beg.lastIndexOf("\n");
+
+        let last_newline = sub_beg.lastIndexOf("\n");
+        let n_sub_beg = sub_end.substring(0, last_newline - 1);
+        let n_last_newline = n_sub_beg.lastIndexOf("\n");
+        let last_line_size = last_newline - n_last_newline;
+        console.log(sub_beg, n_sub_beg, last_line_size);
+        move_cursor(-hor_offset - last_line_size + hor_offset)
+    } else {
+        let sub_beg = buffer.substring(0, cursor);
+        let sub_end = buffer.substring(cursor, buffer.length);
+        let hor_offset = cursor - sub_beg.lastIndexOf('\n');
+
+        let next_newline = sub_end.indexOf("\n");
+        let n_sub_end = sub_end.substring(next_newline + 1, sub_end.length);
+        let n_next_newline = n_sub_end.indexOf("\n");
+        let next_line_size = n_next_newline - next_newline + 1;
+        
+        if(hor_offset > next_line_size)
+            hor_offset = next_line_size;
+        move_cursor(next_newline + hor_offset);
+    }
+}
 function read_input() {
     let b = read(stdin);
     if(b.length > 0) {
@@ -62,17 +90,17 @@ function read_input() {
                 write_changes();
                 exit();
                 break;
-            case "ArrowLeft":
+            case "\x03": // Left
                 move_cursor(-1)
                 break;
-            case "ArrowRight":
+            case "\x01": // Right
                 move_cursor(1)
                 break;
-            case "ArrowUp":
-                //TODO
+            case "\x00": // Up
+                move_vertically(true);
                 break;
-            case "ArrowDown":
-                //TODO
+            case "\x02": // Down
+                move_vertically(false);
                 break;
             default:
                 for(let char of b) {

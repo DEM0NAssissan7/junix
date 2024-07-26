@@ -3,9 +3,13 @@ let fd;
 this.main = function() {
     try {
         let string, fd, fs;
+        let success = false;
         for(let i = 0; i < localStorage.length; i++) {
             string = localStorage.getItem("disk" + (i+1));
-            if(string == null) break;
+            if(string == null) {
+                success = true;
+                break;
+            }
             fs = new JFS();
             fs.parse(string);
             initiate_fs(fs, disks);
@@ -14,10 +18,10 @@ this.main = function() {
             write(fd, fs);
             fclose(fd);
         }
-        if(localStorage.length === 0) throw "Needs initialization";
+        if(!success) throw "Needs initialization";
         printf("On-device storage has been mapped \n");
     } catch (e) {
-        printf(e);
+        printf(e + "\n");
         create_disk();
         printf("On-device storage initialized\n");
     }

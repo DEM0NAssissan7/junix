@@ -21,7 +21,8 @@ function get_file_type(path) {
     }
     return result;
 }
-this.main = function(path) {
+this.main = function(args) {
+    let path = args[0];
     printf(dirname(path) + ": " + get_file_type(path) + "\n");
     exit();
 }
