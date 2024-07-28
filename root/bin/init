@@ -58,7 +58,7 @@ function post_driver() {
             " [" + get_variable_value("MINOR_VERSION", deftable) + "]\n\n");
     fclose(fd);
 
-    printf("Starting /etc/rc\n");
+    printf("Reading startup script from /etc/rc\n");
     fd = fopen("/etc/rc", "r");
     let paths = read(fd).split("\n");
     fclose(fd);

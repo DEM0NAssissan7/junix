@@ -466,6 +466,7 @@ let errno;
                 this.exec_time = 0;
             }
             exec(code, args, path) {
+                if(!code.main) throw new Error("Exec: specified code does not have a .main method");
                 this.code = code; // Replace process code object with exec
                 this.cmdline = path;
                 this.command = get_filename(path);
