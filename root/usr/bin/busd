@@ -1,0 +1,7 @@
+/* BusD: Bus Daemon - Allow processes to find one another and communicate */
+
+let comfd;
+this.main = (args) => {
+    printf("Initializing BusD socket file\n");
+    comfd = fopen("/run/bus");
+}

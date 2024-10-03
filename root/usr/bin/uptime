@@ -1,0 +1,13 @@
+
+function minutes_seconds(seconds) {
+    return {
+        seconds: seconds % 60,
+        minutes: Math.floor(seconds / 60)
+    }
+}
+this.main = function() {
+    let sys = sysinfo();
+    let t = minutes_seconds(sys.uptime);
+    printf("up " + t.minutes + ":" + t.seconds + ", load average " + sys.loads[0] + ", " + sys.loads[1] + ", " + sys.loads[2] + "\n");
+    exit();
+}

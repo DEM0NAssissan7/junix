@@ -1,0 +1,341 @@
+let buffer = "";
+let previous_buffers = [];
+let seeker_index = -1;
+let prompt = "#";
+const cursor_char = "_";
+let paths = [];
+let env;
+let executed = false;
+const version_string = "sh 1.1"
+let init = false;
+let condition_met = true;
+this.main = function(args, envp) {
+    if(!init) {
+        env = envp;
+    
+        paths = get_variable_value("PATH", env).split(":");
+    
+        printf(version_string+"\n");
+        if(getuid() !== 0)
+            prompt = "$";
+        reprompt();
+        init = true;
+    }
+    if(command_queue.length !== 0) {
+        run_queue();
+        return;
+    }
+    if(executed) {
+        buffer = "";
+        reprompt();
+        executed = false;
+    }
+    let b = read(0);
+    if(b.length > 0) {
+        add_to_buffer(b)
+        run_queue();
+    }
+}
+
+function test_completion(candidates, names, verb) {
+    for(let name of names) {
+        let failed = false;
+        for(let i = 0; i < verb.length; i++) {
+            if(name[i] !== verb[i]) {
+                failed = true;
+                break;
+            }
+        }
+        if(!failed)
+            candidates.push(name);
+    }
+}
+
+function test_completion_match(candidates, path, verb) {
+    let fd = opendir(path);
+    let _candidates = [];
+    test_completion(_candidates, listdir(fd), verb);
+    for(let c of _candidates) {
+        if(stat(path + "/" + c).type === 'd')
+            candidates.push(c + "/");
+        else
+            candidates.push(c + " ");
+    }
+    fclose(fd);
+}
+
+function tab_completion(verb, find_commands) {
+    let candidates = [];
+    if(verb.length === 1 && verb[0] === ".") return ['./'];
+    if(verb[0] !== "/" && verb[0] !== "." && find_commands) {
+        test_completion(candidates, internal_commands.map(a => a[0]), verb);
+        candidates = candidates.map(a => a + " ");
+        for(let path of paths) {
+            try {
+                test_completion_match(candidates, path, verb);
+            } catch (e) {
+                fprintf(stderr, "Invalid PATH\n");
+                fprintf(stderr, e + "\n");
+            }
+        }
+    } else {
+        try {
+            let _verb = verb.split("/");
+            let _path = _verb.toSpliced(_verb.length - 1, 1);
+            let path = "";
+            for(let e of _path) {
+                if(e === ".") continue;
+                path += e + "/";
+            }
+            test_completion_match(candidates, dirname(path), _verb[_verb.length - 1]);
+        } catch (e) {
+            console.error(e);
+            return [];
+        }
+    }
+    candidates = candidates.sort();
+    return candidates;
+}
+
+function clear_buffer() {
+    for(let i = 0; i < buffer.length; i++)
+        printf("\b");
+}
+function seek() {
+    clear_buffer();
+    buffer = previous_buffers[seeker_index];
+    printf(buffer);
+}
+
+function add_to_buffer(b) {
+    printf('\b'); // Clear old cursor
+    let command_ran = false;
+    for(let i = 0; i < b.length; i++) {
+        let a = b[i]; // Char
+
+        switch(a) {
+            case '\b':
+                if(buffer.length - 1 < 0)
+                    break;
+                buffer = buffer.substring(0, buffer.length - 1);
+                printf('\b')
+                break;
+            case '\n':
+                printf('\n')
+                command_ran = true;
+                seeker_index = -1;
+                if(buffer.length > 0) {
+                    previous_buffers.splice(0, 0, buffer);
+                    parse_input(buffer);
+                    break;
+                }
+                else
+                    reprompt();
+                break;
+            case '\t':
+                let verbs = buffer.split(' ');
+                let verb = verbs[verbs.length - 1];
+                let verb_paths = verb.split('/');
+                let candidates = tab_completion(verb, verbs.length === 1);
+                if(candidates.length === 0)
+                    break;
+                if(candidates.length === 1) {
+                    // Clear buffer from print
+                    clear_buffer();
+                    buffer = buffer.substring(0, buffer.length - verb_paths[verb_paths.length - 1].length);
+                    let complete = candidates[0];
+                    buffer += complete;
+                    printf(buffer);
+                } else {
+                    printf("\n")
+                    for(let candidate of candidates)
+                        printf(candidate + " ");
+                    printf("\n" + prompt + " " + buffer);
+                }
+                break;
+            case '\x00': // Up arrow
+                if(seeker_index < previous_buffers.length - 1) {
+                    seeker_index++;
+                    seek();
+                }
+                break;
+            case '\x02': // Down arrow
+                if(seeker_index > 0) {
+                    seeker_index--;
+                    seek();
+                }
+                break;
+            default:
+                printf(a)
+                buffer += a;
+                break;
+        }
+    }
+    if(!command_ran)
+        printf(cursor_char); // Add new cursor
+}
+function reprompt() {
+    buffer = "";
+    printf(prompt + " " + cursor_char);
+}
+function find_path(command) {
+    for(let path of paths)
+        if(listdir(opendir(path)).indexOf(command) !== -1)
+            return path;
+    return "";
+}
+let internal_commands = [
+    ["exit", (args) => {
+        exit();
+    }],
+    ["clear", () => {
+        printf('\?');
+    }],
+    ["cd", (args) => {
+        chdir(args[0]);
+    }],
+    ["pwd", () => {
+        printf(getcwd() + "\n");
+    }],
+    ["echo", (args) => {
+        for(let arg of args) {
+            printf(arg + " ");
+        }
+        printf("\n");
+    }],
+    ["which", (args) => {
+        for(let arg of args) {
+            let path = find_path(arg);
+            if(path === "") {
+                printf("'" + arg + "' was not found\n");
+                continue;
+            }
+            printf(path + "/" + arg + "\n");
+        }
+    }],
+    ["exec", (args) => {
+        let _args = args.toSpliced(0, 1);
+        let cmd = args[0];
+        let path = find_path(cmd);
+        if(path === "") {
+            exec(cmd, _args, env);
+        } else {
+            exec(path + "/" + cmd, _args, env);
+        }
+    }]
+]
+function run_script(string) {
+    let commands = string.split("\n");
+    for(let c of commands)
+        parse_input(c);
+}
+function parse_input(buffer) {
+    let token = "";
+    let command = "";
+    let add_to_queue = (conditional) => {
+        if(token.length > 0) {
+            if(command.length === 0)
+                queue(token, "", conditional);
+            else
+                queue(command, token, conditional);
+        }
+        command = "";
+        token = "";
+    }
+    for(let i = 0; i < buffer.length; i++) {
+        let c = buffer[i];
+        switch(c) {
+            case "&":
+                if(buffer[i+1] === "&")
+                    add_to_queue(true);
+                break;
+            case '#':
+                add_to_queue(false);
+                return
+            case ';':
+                add_to_queue(false);
+                break;
+            case ' ':
+                if(i === buffer.length - 1)
+                    break;
+                if(buffer[i+1] === " ")
+                    break;
+                if(command.length === 0 && token.length !== 0) {
+                    command = token;
+                    token = "";
+                    break;
+                }
+                if(token.length === 0)
+                    break;
+            default:
+                token+=c;
+                break;
+        }
+    }
+    if(token.length > 0 || command.length > 0)
+        add_to_queue(false);
+}
+let command_queue = [];
+function queue(command, args, conditional) {
+    try {
+        command_queue.push([command, parse_arguments(args), conditional]);
+    } catch (e) {
+        fprintf(stderr, e);
+    }
+}
+function run_queue() {
+    if(command_queue.length !== 0) {
+        let cmd = command_queue[0];
+        if(cmd[2]) {
+            if(condition_met)
+                condition_met = execute_command(cmd[0], cmd[1]) ? false : true;
+        } else
+            condition_met = execute_command(cmd[0], cmd[1]) ? false : true;
+        command_queue.splice(0, 1);
+        if(command_queue.length !== 0)
+            sleep(1)
+    }
+}
+function execute_command(command, args) {
+    executed = true;
+
+    let callback = internal_commands.find(a => {
+        if (a[0] === command)
+            return true;
+    });
+    if(callback) {
+        try {
+            callback[1](args);
+        } catch (e) {
+            if(!is_interrupt(e))
+                fprintf(stderr, "sh: "+e+"\n")
+        }
+    } else {
+        let cmdline;
+        if(command[0] === "/" || command[0] === ".")
+            cmdline = command;
+        else
+            cmdline = find_path(command) + "/" + command;
+        if(!access(cmdline)) {
+            fprintf(stderr, command + " not found\n");
+            return 1;
+        }
+        let fd = fopen(cmdline, "r");
+        let data = read(fd);
+        fclose(fd);
+        if(typeof data === "string") {
+            run_script(data);
+            return 0;
+        }
+        try {
+            fork(() => {
+                exec(cmdline, args, env);
+            });
+            wait();
+        } catch (e) {
+            if(!is_interrupt(e))
+                fprintf(stderr, "sh: " + e + "\n");
+            return 1;
+        }
+    }
+}

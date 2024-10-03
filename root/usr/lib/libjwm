@@ -1,0 +1,185 @@
+const framebuffer_device = "/dev/fbdev";
+const mouse_device = "/dev/mouse";
+const ctx_device = "/dev/ctx";
+const wm_interface = "/run/wm/";
+
+const default_window_size = {width: 400, height: 400};
+
+class WM {
+    CREATE_WINDOW = 0;
+    WINDOW_UPDATE = 1;
+}
+
+let wm_has_init = false;
+let framerate = 0;
+let persistent_frames = 0;
+let active_persistence = 0;
+let framebuff_fd, mouse_fd, ctx, ctx_fd;
+let request_update = true;
+let cursor_canvas = new OffscreenCanvas(16, 16);
+let wallpaper_canvas;
+let windows = [];
+
+let window;
+
+/* General Window Structures */
+class Win {
+    constructor() {
+        this.resize(default_window_size.width, default_window_size.height)
+    }
+    resize(width, height) {
+        this.width = width;
+        this.height = height;
+        this.canvas = new OffscreenCanvas(this.width, this.height);
+        this.ctx = this.canvas.getContext("2d");
+    }
+    run() {
+        
+    }
+}
+
+
+/* Window Manager */
+
+function set_framerate(f) {
+    framerate = f;
+    // persistent_frames = f / 10;
+    persistent_frames = 0;
+}
+set_framerate(100);
+{
+    let old_time = get_time();
+    let get_framerate = () => {
+        let time = get_time();
+        let k = 1000/(time - old_time);
+        old_time = time;
+        return k;
+    }
+    function display_framerate() {
+        let framerate = get_framerate();
+        ctx.fillStyle = "black";
+        ctx.fillText(framerate, 20, 20);
+    }
+}
+let detect_wm_changes = () => {
+    let mouse = read(mouse_fd);
+    if (round(mouse.vectorX, 4) !== 0 || round(mouse.vectorY, 4) !== 0) {
+        active_persistence = persistent_frames;
+        return true;
+    }
+    // Allow frames to persist running even when there are no changes. Makes the system more consistent.
+    if(active_persistence > 0) {
+        console.log(active_persistence);
+        active_persistence--;
+        return true;
+    }
+    return false;
+}
+function init_wm() {
+    if(!wm_has_init) {
+        framebuff_fd = fopen(framebuffer_device, "w");
+        mouse_fd = fopen(mouse_device, "r");
+        // Set mode
+        let window_fd = fopen("/dev/window", "r");
+        let _window = read(window_fd);
+        write(framebuff_fd, {
+            modeset: true,
+            width: _window.width - 16,
+            height: _window.height - 16
+        });
+        wallpaper_canvas = new OffscreenCanvas(_window.width, _window.height);
+        create_default_wallpaper();
+        fclose(window_fd);
+    
+        ctx_fd = fopen(ctx_device, "r");
+        ctx = read(ctx_fd);
+        create_cursor_image(default_cursor_handler);
+        update_wm(true);
+        
+        wm_has_init = true
+    }
+}
+
+function update_wm(force_run, handler) {
+    request_update = detect_wm_changes();
+    if (request_update || force_run) {
+        draw_background();
+        // Render cursor
+        if(handler)
+            handler();
+        render_cursor();
+        request_update = false;
+    }
+    sleep(1000 / framerate);
+}
+
+function create_cursor_image(handler) {
+    let _ctx = cursor_canvas.getContext("2d");
+    handler(_ctx);
+}
+function default_cursor_handler(ctx) {
+    ctx.strokeStyle = 'white';
+    ctx.fillStyle = 'black';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    //Base (left)
+    ctx.moveTo(0, 0);
+    ctx.lineTo(0, 13);
+    //Handle (left)
+    ctx.lineTo(3, 10);
+    //Handle base (l/r)
+    ctx.lineTo(5, 15);
+    ctx.lineTo(8, 14);
+    //Handle (right)
+    ctx.lineTo(6, 9);
+    //Base (right)
+    ctx.lineTo(10, 9);
+    ctx.lineTo(0, 0);
+    
+    ctx.fill();
+    ctx.stroke();
+}
+function render_cursor() {
+    let mouse = read(mouse_fd);
+    ctx.drawImage(cursor_canvas, mouse.x, mouse.y);
+}
+function draw_background() {
+    ctx.drawImage(wallpaper_canvas, 0, 0);
+}
+function create_default_wallpaper() {
+    let _ctx = wallpaper_canvas.getContext("2d");
+    _ctx.fillStyle = "gray";
+    _ctx.fillRect(0, 0, wallpaper_canvas.width, wallpaper_canvas.height);
+}
+
+/* Window Creation */
+
+function get_wm_info() {
+    let fd = fopen(wm_interface + getpid() + "a", "r");
+    let r = read(fd)
+    fclose
+    return r;
+}
+function send_wm_message(type, data) {
+    let fd = fopen(wm_interface, "r");
+    let interface_obj = read(fd);
+    switch(type) {
+        case WM.CREATE_WINDOW:
+            interface_obj.push({
+                type: type,
+                data: data,
+                pid: getpid()
+            });
+            break;
+        
+    }
+    fclose(fd);
+}
+function has_fifo() {
+    if(!access(wm_interface + getpid() + "a"))
+        return false;
+    return true;
+}
+function create_window(title, ) {
+
+}

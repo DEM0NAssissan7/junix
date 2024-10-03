@@ -1,0 +1,7 @@
+// Dynamic Library Loader
+
+let paths;
+this.main = (argc, envp) => {
+    paths = get_variable_value("LD_LIBRARY_PATH", envp).split(":");
+    
+}

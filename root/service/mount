@@ -1,0 +1,5 @@
+this.main = function() {
+    // Mount permanent storage
+    mount("/dev/disk1", "/home");
+    exit();
+}

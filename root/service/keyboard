@@ -1,0 +1,44 @@
+let fd;
+let keys = "";
+
+function keyupdate() {
+    write(fd, keys);
+    keys = "";
+}
+this.main = function() {
+    fd = fopen("/dev/keyboard", "w", 777);
+    thread(keyupdate, []);
+    printf("Created keyboard driver\n");
+    sleep(-1);
+}
+
+const key_replacements = [
+    ["Backspace", '\b'],
+    [' ', ' '],
+    ["Shift", ''],
+    ["Enter", '\n'],
+    ["Meta", ''],
+    ["Control", '\c'],
+    ["Tab", '\t'],
+    ["ArrowUp", '\x00'],
+    ["ArrowRight", '\x01'],
+    ["ArrowDown", '\x02'],
+    ["ArrowLeft", '\x03'],
+    ["CapsLock", ""],
+]
+
+function replace_keys(key) {
+    for(let r of key_replacements)
+        if(r[0] === key)
+            return r[1];
+    return key;
+}
+
+document.addEventListener("keydown", (e) => {
+    keys += replace_keys(e.key);
+    e.preventDefault();
+});
+
+document.addEventListener("keyup", (e) => {
+    keys = keys.replaceAll(replace_keys(e.key), "");
+});

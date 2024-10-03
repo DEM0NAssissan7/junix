@@ -1,0 +1,28 @@
+function get_file_type(path) {
+    let fd = fopen(path, "r");
+    let data;
+    try {
+        data = read(fd);
+    } catch (e) {
+        fclose(fd);
+        fd = opendir(path);
+        if(listdir(fd)) return "directory";
+    }
+    let result = typeof data;
+    switch(result) {
+        case "function":
+            try{
+                if((new data()).main)
+                    return "executable";
+            } catch (e) {}
+        case "object":
+            if(data.magic === 20)
+                return "filesystem";
+    }
+    return result;
+}
+this.main = function(args) {
+    let path = args[0];
+    printf(dirname(path) + ": " + get_file_type(path) + "\n");
+    exit();
+}

@@ -1,0 +1,62 @@
+let disks = 1;
+let fd;
+this.main = function() {
+    try {
+        let string, fd, fs;
+        let success = false;
+        for(let i = 0; i < localStorage.length; i++) {
+            string = localStorage.getItem("disk" + (i+1));
+            if(string == null) {
+                success = true;
+                break;
+            }
+            fs = new JFS();
+            fs.parse(string);
+            initiate_fs(fs, disks);
+            fd = fopen("/dev/disk" + disks++, "w");
+            printf("Created /dev/disk" + (disks-1) + "\n");
+            write(fd, fs);
+            fclose(fd);
+        }
+        if(!success) throw "Needs initialization";
+        printf("On-device storage has been mapped \n");
+    } catch (e) {
+        printf(e + "\n");
+        create_disk();
+        printf("On-device storage initialized\n");
+    }
+    fd = fopen("/dev/localstorage", "w");
+    sleep(-1);
+    sync();
+    thread(call_watcher, []);
+    thread(sync_disks);
+}
+function sync_disks() {
+    sync(); // Sync disks every 30 seconds
+    sleep(1000 * 30);
+}
+function initiate_fs(fs, disk_id) {
+    fs.sync = function() {
+        localStorage.setItem("disk" + disk_id, fs.stringify());
+        console.log("Synced disk");
+    }
+}
+function create_disk() {
+    let fs = new JFS();
+    initiate_fs(fs, disks);
+    localStorage.setItem("disk" + disks, fs.stringify());
+    let _fd = fopen("/dev/disk" + disks, "w");
+    write(_fd, fs);
+    fclose(_fd);
+    printf("Created /dev/disk" + disks++ + "\n");
+}
+let input;
+function call_watcher() {
+    input = read(fd);
+    if(input.length > 0) {
+        if(input == "c") {
+            create_disk();
+        }
+    }
+    write(fd, "");
+}

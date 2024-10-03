@@ -1,0 +1,6 @@
+this.main = function(args) {
+    let pid = parseInt(args[0]);
+    let signal = parseInt(args[1] ?? 15);
+    kill(pid, signal);
+    exit();
+}

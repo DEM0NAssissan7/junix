@@ -1,0 +1,4 @@
+// This program is responsible for detecting and initializing drivers for all hardware attached at all times
+
+this.main() = () => {
+}

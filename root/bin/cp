@@ -1,0 +1,84 @@
+let recursive = false;
+let src, dest;
+
+this.main = function(args) {
+    for(let arg of args) {
+        switch(arg) {
+            case "-r":
+                recursive = true;
+                break;
+            default:
+                if(!src) {
+                    src = arg;
+                    break;
+                }
+                if(!dest) {
+                    dest = arg;
+                    cp();
+                    exit();
+                }
+        }
+    }
+    if(!src) {
+        fprintf(stderr, "No source specified\n");
+    }
+    if(!dest) {
+        fprintf(stderr, "No destination specified\n");
+    }
+    exit();
+}
+
+
+function cp_file(src, dest) {
+    // Get original file data
+    let fd = fopen(src, "r");
+    let src_data = read(fd);
+    fclose(fd);
+
+    // Write to destination file
+    if(stat(dest).type !== "d" || !access(dest)) {
+        fd = fopen(dest, "w");
+        write(fd, src_data);
+        fclose(fd);
+    } else {
+        let filename = get_filename(src);
+        fd = fopen(dest + "/" + filename, "w");
+        write(fd, src_data);
+        fclose(fd);
+    }
+}
+function cp_dir(src, dest) {
+    let fd = opendir(src);
+    pathnames = listdir(fd);
+    fclose(fd);
+
+    if(!access(dest)) {
+        mkdir(dest);
+    }
+    for(let path of pathnames) {
+        const src_path = src + "/" + path;
+        const src_type = stat(src_path).type;
+        const dest_path = dest + "/" + path
+        if(src_type === "d") {
+            if(!access(dest_path))
+                mkdir(dest_path)
+            cp_dir(src_path, dest_path);
+        } else {
+            cp_file(src_path, dest_path);
+        }
+    }
+}
+function cp() {
+
+    if(!recursive) {
+        try {
+            cp_file(src, dest);
+        } catch (e) {
+            fprintf(stderr, "Could not copy: " + e + "\n");
+            fprintf(stderr, "Perhaps you should use -r if you are copying to a directory.\n");
+            exit();
+        }
+    } else {
+        cp_dir(src, dest);
+    }
+}

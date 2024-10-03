@@ -1,0 +1,83 @@
+// JUNIX Init system: inspired by FreeBSD rc
+let fd, loginconf;
+let pid;
+let started = false;
+this.main = () => {
+    if(getpid() !== 1) {
+        fprintf(stderr, "init can only run on PID 1\n");
+        exit();
+    }
+    if(!started) {
+        // Clear old logs
+        fd = open("/var/log/init", "w");
+        write(fd, "");
+        close(fd);
+
+        open("/dev/null", "w") // Stdin
+        open("/var/log/init", "a"); // Stdout
+        dup(stdout); // Stderr
+
+        fd = open("/etc/login.conf", "r");
+        loginconf = read(fd);
+        close(fd);
+
+        fd = open("/etc/services", "r");
+        let paths = read(fd).split("\n");
+        close(fd);
+        for(let path of paths)
+            start(path);
+        close(stdin);
+        close(stdout);
+        close(stderr);
+    
+        pid = thread(post_driver);
+        started = true;
+        sleep(-1);
+    } else {
+        fprintf(stderr, "Running init after starting: something is going on.");
+    }
+}
+let wait = false;
+let finished = false;
+function post_driver() {
+    if(!wait) { // Allow the drivers to initialize before starting /etc/rc
+        wait = true;
+        return;
+    }
+    if(finished) return;
+    console.log("Running post driver-init");
+    // Create stdin, stdout, and stderr
+    open("/dev/keyboard", "r"); // Stdin
+    open("/dev/console", "a"); // Stdout 
+    dup(stdout); // Stderr
+
+    fd = open("/etc/os-release", "r");
+    let deftable = map_variables(read(fd));
+    printf(get_variable_value("NAME", deftable) + " " +
+            get_variable_value("MAJOR_VERSION", deftable) +
+            " [" + get_variable_value("MINOR_VERSION", deftable) + "]\n\n");
+    close(fd);
+
+    printf("Reading startup script from /etc/rc\n");
+    fd = open("/etc/rc", "r");
+    let paths = read(fd).split("\n");
+    close(fd);
+    let c;
+    for(let command of paths) {
+        c = parse_command(command);
+        start(c.cmd, c.args);
+    }
+    printf("\n\n");
+
+    cancel(pid);
+    wait = true;
+    finished = true;
+}
+function start (path, args) {
+    printf("Starting " + path)
+    console.log("starting " + path);
+    fork(() => {
+        printf(" [" + getpid() + "]\n");
+        exec(path, args, map_variables(loginconf));
+    });
+}

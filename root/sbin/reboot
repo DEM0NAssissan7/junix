@@ -1,0 +1,6 @@
+this.main = function(args) {
+    printf("Rebooting system...\n")
+    let op = parseInt(args);
+    if(!op) op = 3;
+    reboot(op);
+}

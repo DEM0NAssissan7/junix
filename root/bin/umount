@@ -1,0 +1,4 @@
+this.main = function(args) {
+    umount(args[0]);
+    exit();
+}

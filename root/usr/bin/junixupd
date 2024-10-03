@@ -1,0 +1,99 @@
+const upd_dev = "/dev/updfs";
+const upd_mnt = "/mnt/update";
+const default_update_path = "/dev/jupd";
+let completed = false;
+let quiet = false;
+let write_etc = false;
+let reboot_when_finshed = false;
+this.main = function(args) {
+    if(completed) {
+        printf("\nFiles successfully copied!\n")
+        printf("Unmounting update filesystem...\n")
+        umount(upd_mnt);
+        printf("Deleting update device...\n");
+        unlink(upd_dev);
+        printf("Syncing update changes...\n");
+        sync();
+        printf("\n\nUpdate complete!\n");
+        if(!reboot_when_finshed)
+            exit();
+        else {
+            printf("Rebooting after update finished...\n");
+            reboot(3);
+        }
+    }
+    let update_path = default_update_path
+    for(let arg of args) {
+        switch(arg) {
+            case "-q":
+            case "--quiet":
+                quiet = true;
+                continue;
+            case "-e":
+            case "--write-etc":
+                write_etc = true;
+                continue;
+            case "-r":
+            case "--reboot":
+                reboot_when_finshed = true;
+                continue;
+        }
+        update_path = arg;
+        break;
+    }
+    if(quiet) {
+        fclose(stdout, true);
+        fopen("/dev/null", "w");
+    }
+    printf("Running JUNIX system update...\n\n");
+    printf("Extracting filesystem from update file.\n");
+    let fd = fopen(update_path, "r");
+    let string = read(fd);
+    let fs = new JFS();
+    if(typeof string !== "object")
+        fs.parse(string);
+    else
+        fs = string;
+    fclose(fd);
+
+    printf("\nCreating update filesystem device\n");
+    fd = fopen(upd_dev, "w");
+    write(fd, fs);
+    fclose(fd);
+    
+    printf("\nMounting update image\n");
+    if(!access(upd_mnt))
+        mkdir(upd_mnt);
+    mount(upd_dev, upd_mnt);
+
+    printf("Copying update files to the rest of the system\n");
+    if(!write_etc) {
+        copy_dirs(  "/bin",
+                    "/boot",
+                    "/sbin",
+                    "/service",
+                    "/usr");
+        copy_files( "/etc/os-release")
+    } else
+        copy_dirs("/"); // Copy all directories from update file
+    completed = true;
+    wait();
+}
+function copy_dirs(...names) {
+    for(let name of names) {
+        const dir = name;
+        printf(upd_mnt + dir + " -> " + dir + "\n");
+        fork(() => {
+            exec(upd_mnt + "/bin/cp", ["-r", upd_mnt + dir, dir]);
+        });
+    }
+}
+function copy_files(...names) {
+    for(let name of names) {
+        const path = name;
+        printf(upd_mnt + path + " -> " + path + "\n");
+        fork(() => {
+            exec(upd_mnt + "/bin/cp", [upd_mnt + path, path]);
+        });
+    }
+}

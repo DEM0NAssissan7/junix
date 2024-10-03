@@ -1,0 +1,5 @@
+this.main = function(args) {
+    for(let arg of args)
+        unlink(arg);
+    exit();
+}

@@ -1,0 +1,26 @@
+let is_file = true;
+let cmd;
+let evals = [];
+this.main = function(args) {
+    for(let arg of args) {
+        switch(arg) {
+            case "-e":
+                is_file = false;
+                break;
+            default:
+                if(is_file) {
+                    let fd = fopen(arg, "r");
+                    let data = read(fd);
+                    evals.push(data);
+                } else {
+                    evals.push(arg);
+                    is_file = true;
+                }
+        }
+    }
+    (function(){
+        for(let e of evals)
+            eval(e);
+    })();
+    exit();
+}

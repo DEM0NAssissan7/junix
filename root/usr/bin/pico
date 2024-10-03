@@ -1,0 +1,145 @@
+let buffer = "";
+let prototype;
+let cursor = 0;
+let filename = "";
+let dir = "";
+let filetype;
+this.main = function(args) {
+    let path = args[0];
+    filename = get_filename(path);
+    dir = dirname(path);
+    let fd = fopen(path, "w");
+    buffer = read(fd);
+    filetype = typeof buffer;
+    if(filetype !== "string") {
+        switch(filetype) {
+            case "function":
+                buffer = buffer.toString();
+                break;
+            case "object":
+                if(buffer.magic === 20) {
+                    buffer = buffer.stringify();
+                    filetype = "filesystem";
+                    break;
+                }
+                prototype = buffer;
+                buffer = JSON.stringify(buffer);
+                break;
+        }
+    }
+    fclose(fd);
+    
+    draw_screen();
+    thread(read_input);
+    sleep(-1);
+}
+
+function write_changes() {
+    let fd = fopen(dir, "w");
+    switch(filetype) {
+        case "function":
+            buffer = (new Function("return " + buffer))();
+            break;
+        case "object":
+            Object.assign(prototype, JSON.parse(buffer));
+            buffer = prototype;
+            break;
+        case "filesystem":
+            let fs = new JFS();
+            fs.parse(buffer)
+            buffer = fs;
+            break;
+    }
+    write(fd, buffer);
+    fclose(fd);
+    printf("\nWrote changes to " + dir + "...\n");
+}
+function move_vertically(up) {
+    if(up) {
+        let sub_beg = buffer.substring(0, cursor);
+        let sub_end = buffer.substring(cursor, buffer.length);
+        let hor_offset = cursor - sub_beg.lastIndexOf("\n");
+
+        let last_newline = sub_beg.lastIndexOf("\n");
+        let n_sub_beg = sub_end.substring(0, last_newline - 1);
+        let n_last_newline = n_sub_beg.lastIndexOf("\n");
+        let last_line_size = last_newline - n_last_newline;
+        console.log(sub_beg, n_sub_beg, last_line_size);
+        move_cursor(-hor_offset - last_line_size + hor_offset)
+    } else {
+        let sub_beg = buffer.substring(0, cursor);
+        let sub_end = buffer.substring(cursor, buffer.length);
+        let hor_offset = cursor - sub_beg.lastIndexOf('\n');
+
+        let next_newline = sub_end.indexOf("\n");
+        let n_sub_end = sub_end.substring(next_newline + 1, sub_end.length);
+        let n_next_newline = n_sub_end.indexOf("\n");
+        let next_line_size = n_next_newline - next_newline + 1;
+        
+        if(hor_offset > next_line_size)
+            hor_offset = next_line_size;
+        move_cursor(next_newline + hor_offset);
+    }
+}
+function read_input() {
+    let b = read(stdin);
+    if(b.length > 0) {
+        // Do key things
+        switch(b) {
+            case "Escape":
+                write_changes();
+                exit();
+                break;
+            case "\x03": // Left
+                move_cursor(-1)
+                break;
+            case "\x01": // Right
+                move_cursor(1)
+                break;
+            case "\x00": // Up
+                move_vertically(true);
+                break;
+            case "\x02": // Down
+                move_vertically(false);
+                break;
+            default:
+                for(let char of b) {
+                    switch(char) {
+                        case '\b':
+                            buffer = del_char(buffer, cursor);
+                            move_cursor(-1)
+                            break;
+                        default:
+                            buffer = place_char(buffer, char, cursor);
+                            move_cursor(1);
+                            break;
+                    }
+                }
+        }
+        draw_screen();
+    }
+}
+function draw_screen() {
+    printf("\?");
+
+    printf(filetype + ": "+dir + "\n\n" + place_char(buffer, "|", cursor));
+}
+
+function move_cursor(value) {
+    cursor += value;
+    if(cursor < 0)
+        cursor = 0;
+    if(cursor > buffer.length)
+        cursor = buffer.length;
+}
+
+function place_char(buff, char, index) {
+    let buf1 = buff.substring(0, index);
+    let buf2 = buff.substring(index, buff.length);
+    return buf1 + char + buf2;
+}
+function del_char(buff, index) {
+    let buf1 = buff.substring(0, index - 1);
+    let buf2 = buff.substring(index, buff.length);
+    return buf1 + buf2;
+}

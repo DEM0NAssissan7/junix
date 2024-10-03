@@ -1,0 +1,4 @@
+this.main = function() {
+    sync();
+    exit();
+}

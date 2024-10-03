@@ -1,0 +1,7 @@
+// Make local storage
+
+this.main = function() {
+    let fd = fopen("/dev/localstorage", "w");
+    write(fd, "c");
+    exit();
+}

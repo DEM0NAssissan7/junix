@@ -1,0 +1,17 @@
+// Reference jwmlib implementation. Helps debugging.
+
+let init = false;
+this.main = function (argc, envp) {
+    if (!init) {
+        load("libjwm", envp);
+        ldlibs(argc, envp);
+        init_wm();
+        init = true;
+        return;
+    }
+    update_wm(false, draw_loop);
+}
+
+function draw_loop() {
+    display_framerate();
+}

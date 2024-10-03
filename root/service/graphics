@@ -1,0 +1,103 @@
+let console_fd, console_element, framebuff_fd, canvas, ctx;
+let mode = "console";
+let init = false;
+const framebuffer_device = "/dev/fbdev";
+const console_device = "/dev/console";
+const ctx_device = "/dev/ctx";
+this.main = function() {
+    if(!init) {
+        init_console();
+        init_framebuffer();
+        init_window();
+        init = true;
+    }
+    check_mode();
+    switch(mode) {
+        case "console":
+            update_console();
+            break;
+        case "framebuffer":
+            break;
+        default:
+            throw new Error("Mode is invalid");
+    }
+}
+
+/* Text mode */
+function init_console () {
+    console_element = document.getElementById("console");
+    console_fd = fopen(console_device, "w");
+    printf("Initialized console\n");
+}
+function update_console() {
+    let string = read(console_fd);
+    let buff = console_element.innerText;
+    let char;
+    for(let i = 0; i < string.length; i++) {
+        char = string[i];
+        switch(char) {
+            case "\b":
+                buff = buff.substring(0, buff.length - 1);
+                break;
+            case '\?':
+                buff = "";
+                break;
+            case '\r':
+            default:
+                buff += char;
+                break;
+        }
+    }
+    if(string.length > 0)
+        console_element.innerText = buff
+    write(console_fd, "");
+    sleep(30)
+}
+
+/* Graphics mode */
+function init_framebuffer() {
+    canvas = document.getElementById("canvas");
+    ctx = canvas.getContext("2d");
+    framebuff_fd = fopen(framebuffer_device, "w");
+    let fd = fopen(ctx_device, "w");
+    write(fd, ctx);
+    printf("Initialized framebuffer\n");
+}
+function check_mode () {
+    let input = read(framebuff_fd);
+    if(typeof input === "object") {
+        if(input.modeset === true) { // If the intention is to set the mode
+            canvas.width = input.width;
+            canvas.height = input.height;
+            mode = "framebuffer";
+            console.log("switched to framebuffer");
+            canvas.style = "display: block";
+            console_element.style = "display: none";
+            canvas.style.cursor = 'none';
+        } else if(input.modeset === false) {
+            mode = "console";
+            console.log("switched to console");
+            canvas.style = "display: none";
+            console_element.style = "display: block";
+            canvas.style.cursor = 'auto';
+        }
+        write(framebuff_fd, undefined);
+    }
+}
+
+// Window device
+let window_fd;
+function update_window() {
+    write(window_fd, {
+        width: window.innerWidth,
+        height: window.innerHeight
+    });
+}
+function init_window() {
+    window_fd = fopen("/dev/window", "w");
+    update_window();
+    window.onresize = e => {
+        update_window();
+    };
+    printf("Initialized window device\n");
+}
