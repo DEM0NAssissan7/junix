@@ -72,7 +72,6 @@
         }
 
         let F = new Function("return function(){" + code + "}");
-        F.name = "func";
         write(fd, F());
         fclose(fd);
 

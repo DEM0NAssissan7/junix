@@ -1,0 +1,114 @@
+// Jtar: a terrible clone of UNIX tar library
+
+// Archiving: meat and potatoes
+const modifier_key = "##TAR" + "MOD##:" // This is split to allow the program to also itself be compressed by tar
+const file_marker = "f";
+const dir_marker = "d";
+const name_marker = "n";
+function stringify(path) {
+    let output = "";
+
+    let journal = (path) => {
+        let fd = fopen(path, "r");
+        let type = stat(path).type;
+        switch(type) {
+            case "-":
+                let s = create_string(read(fd));
+                if(s.type === "filesystem") {
+                    fprintf(stderr, "skipping filesystem\n");
+                    break;
+                }
+                output += (modifier_key + file_marker) + s.stringify() + (modifier_key + name_marker) + path;
+                break;
+            case "d":
+                output += (modifier_key + dir_marker) + path; // Journal the directory's existence
+
+                let dirfd = opendir(path);
+                for(let file of listdir(dirfd))
+                    journal(path + "/" + file);
+                break;
+            default:
+                fprintf(stderr, "Unkown data type " + type);
+                break;
+        }
+    }
+    journal(path);
+    output += dir_marker;
+
+    return output;
+}
+function get_modifier(string, index) {
+    for(let i = 0; i < modifier_key.length; i++)
+        if(string[index + i] !== modifier_key[i])
+            return false;
+    
+    // If the modifier key check passed
+    return string[index + modifier_key.length]; // Return its value
+}
+function parse(string, dest) {
+    let path = "";
+    let data = "";
+
+    let pending_type = "dir";
+    let token_type = "path";
+
+    let create_pending_file = () => {
+        if(path.length === 0)
+            return;
+        let file_dest = dest + "/" + path;
+        console.log(file_dest, pending_type);
+        switch(pending_type) {
+            case "dir":
+                mkdir(file_dest);
+                break;
+            case "file":
+                let fd = fopen(file_dest, "w");
+                let stringobj = new StringObj();
+                stringobj.parse(data);
+                write(fd, stringobj.get_data());
+                break;
+        }
+        printf(pending_type + ": " + path + "\n");
+        path = "";
+        data = "";
+    }
+    for(let i = 0; i < string.length; i++) {
+        let mod = get_modifier(string, i);
+        if(mod) {
+            switch(mod) {
+                case dir_marker:
+                    create_pending_file();
+                    pending_type = "dir";
+                    token_type = "path";
+                    break;
+                
+                case file_marker:
+                    create_pending_file();
+                    pending_type = "file";
+                    token_type = "data";
+                    break;
+                case name_marker:
+                    if(pending_type !== "file")
+                        throw new Error("Tar file is corrupted.");
+                    token_type = "path";
+                    break;
+            }
+            i += modifier_key.length;
+            continue;
+        }
+
+        // If there is no modifier
+        let c = string[i];
+        switch(c) {
+            default:
+                switch(token_type) {
+                    case "path":
+                        path += c;
+                        break;
+                    case "data":
+                        data += c;
+                        break;
+                }
+        }
+    }
+}
