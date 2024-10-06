@@ -22,6 +22,8 @@ function system(...args) {
 function fopen(path, flags, mode) {
     if(path === "-")
         return stdout;
+    if(path === "--")
+        return stdin;
     return open(path, flags, mode);
 }
 function fclose(fd, close_special) {
