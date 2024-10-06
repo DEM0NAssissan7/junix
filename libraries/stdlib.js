@@ -1,6 +1,7 @@
 const stdin = 0;
 const stdout = 1;
 const stderr = 2;
+const SHELL = "/bin/sh";
 function fprintf(fd, message) {
     write(fd, message);
 }
@@ -13,9 +14,9 @@ function fgetc(fd) {
     if(string.length > 0) return string;
     return false;
 }
-function system(command, args) {
+function system(...args) {
     fork(() => {
-        exec(command, args);
+        exec(SHELL, args);
     });
 }
 function fopen(path, flags, mode) {
