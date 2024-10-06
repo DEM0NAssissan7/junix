@@ -4,3 +4,4 @@ let comfd;
 this.main = (args) => {
     printf("Initializing BusD socket file\n");
     comfd = fopen("/run/bus");
+}
