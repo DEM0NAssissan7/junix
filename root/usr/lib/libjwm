@@ -75,7 +75,7 @@ let detect_wm_changes = () => {
     }
     return false;
 }
-function init_wm() {
+function init_wm(envp) {
     if(!wm_has_init) {
         framebuff_fd = fopen(framebuffer_device, "w");
         mouse_fd = fopen(mouse_device, "r");
@@ -95,6 +95,9 @@ function init_wm() {
         ctx = read(ctx_fd);
         create_cursor_image(default_cursor_handler);
         update_wm(true);
+
+        let runtime_dir = "/run/wm/1"
+        set_variable_value("RUNTIME_DIR", runtime_dir);
         
         wm_has_init = true
     }
