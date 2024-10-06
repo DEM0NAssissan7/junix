@@ -5,6 +5,10 @@ Main objectives:
 - Microkernel-like architecture
 - Behave as close as possible to a real UNIX-like OS (e.g. syscall names and behaviors)
 
+Features:
+- Stateless (the kernel doesn't actively run any processes)
+- Microkernel: The userspace programs take care of the drivers
+
 TODO:
 - UNIX Domain Sockets
 - FIFO
@@ -133,7 +137,6 @@ let errno;
             console.error("Kernel panic (" + get_time() + ")");
             console.error(message);
             kerror("Kernel panic: " + message);
-            kernel_timeout_id = setTimeout(() => reboot(9), 60000);
             throw new Error("Panic!");
         }
 
@@ -145,6 +148,9 @@ let errno;
         let system_time = 0;
         function syscall(callback) {
             return function (...args) {
+                if(c_thread === null || c_process === null || c_user === null) {
+                    throw new Error("Cannot run systemcall: invalid context " + `(PROCESS: ${c_process}, THREAD: ${c_thread}, USER: ${c_user})`)
+                }
                 return run_syscall(() => callback(...args));
             }
         }
@@ -300,7 +306,7 @@ let errno;
             for (let fs of mount_table) {
                 if (!fs) continue;
                 if (fs.uuid === filesystem.uuid)
-                    throw new Error("Mount failed: Filesystem already exists in mount table.");
+                    throw new Error("Mount failed: Filesystem is already mounted at mountpoint '" + fs.parent_inode.filename + "'");
             }
 
             file.inode.mount(mount_table.length);
@@ -419,7 +425,7 @@ let errno;
         let processes = [];
         let pids = 1;
         let user_time = 0;
-        let c_process, c_user;
+        let c_process, c_user, c_thread;
         class Thread {
             constructor(process, exec, pid, args) {
                 this.process = process;
@@ -427,8 +433,9 @@ let errno;
                 this.pid = pid;
                 this.args = args ?? [];
                 this.sleep = 0;
-                this.queued = false;
-                this.last_exec = get_time(3);
+                this.initialized = false;
+                this.done = false;
+                this.last_exec = 0;
             }
             is_ready(time) {
                 if (this.sleep < 0) return false;
@@ -441,12 +448,33 @@ let errno;
                     return false;
                 return this.is_ready(time);
             }
-            run() {
-                let time = track_time(() => {
-                    this.exec(...this.args);
-                });
-                this.process.exec_time += time;
-                user_time += time;
+            run(time) {
+                thread.exec_time = time;
+                (async () => {
+                    // Set system context
+                    c_process = this.process;
+                    c_thread = this;
+                    c_user = this.process.user;
+                    
+                    this.initialized = true;
+
+                    try {                        
+                        await this.exec(...this.args);
+                    } catch (e) {
+                        if (!is_interrupt(e)) {
+                            console.error(this.process.cmdline + " (" + this.process.pid + ") encountered an error (thread: " + this.pid + ")");
+                            console.error(e);
+                            try {
+                                fprintf(stderr, this.process.command + ": " + e.message + "\n");
+                            } catch (e) {
+                                console.warn("No stderr");
+                            }
+                            this.process.kill();
+                        }
+                    }
+                    this.done = true;
+                    this.process.check_dead();
+                })()
             }
         }
         class Process {
@@ -460,6 +488,9 @@ let errno;
                 this.dead = false;
 
                 this.working_path = working_path;
+                this.time_created = get_time(3);
+                this.waited = 0;
+                this.cputime = 0;
 
                 this.pid = pids;
                 this.user = user;
@@ -477,9 +508,9 @@ let errno;
                 this.code = code; // Replace process code object with exec
                 this.cmdline = path;
                 this.command = get_filename(path);
-                this.threads = [
-                    new Thread(this, this.code.main, this.pid, args)
-                ]
+                let main = new Thread(this, this.code.main, this.pid, args)
+                this.threads = [main]
+                main.run(get_time(3)); // Start the main thread
             }
             clone_descriptors() {
                 let retval = [];
@@ -494,33 +525,34 @@ let errno;
             }
             clone(intermediate_code) {
                 let code = Object.assign(Object.create(Object.getPrototypeOf(this.code)), this.code); // Clone the process running code
-                let process = new Process(code, this.user, this.working_path);
-                this.children.push(process);
-                process.cmdline = this.cmdline;
-                process.command = this.command;
-                process.parent = this;
-                process.child_index = this.children.length - 1;
-                process.descriptor_table = this.clone_descriptors();
+                let p = new Process(code, this.user, this.working_path);
+                this.children.push(p);
+                p.cmdline = this.cmdline;
+                p.command = this.command;
+                p.parent = this;
+                p.child_index = this.children.length - 1;
+                p.descriptor_table = this.clone_descriptors();
 
                 // Run intermediate code because javascript is unable to behave exactly like a real kernel
                 if (intermediate_code) {
-                    let _c_process = c_process;
-                    let _c_thread = c_thread;
-                    let _c_user = c_user;
-                    c_process = process;
-                    c_thread = process.get_thread(c_thread.pid);
-                    c_user = process.user;
+                    let process = c_process;
+                    let thread = c_thread;
+                    let user = c_user;
+
+                    c_process = p;
+                    c_thread = p.threads[0];
+                    c_user = p.user;
                     try {
                         intermediate_code();
                     } catch (e) {
                         this.signal(20);
                         throw new Error("Could not fork process: " + e)
                     }
-                    c_process = _c_process;
-                    c_thread = _c_thread;
-                    c_user = _c_user;
+                    c_process = process;
+                    c_thread = thread;
+                    c_user = user;
                 }
-                return process;
+                return p;
             }
             is_available() {
                 if (this.suspended ||
@@ -528,6 +560,11 @@ let errno;
                     this.waiting)
                     return false;
                 return true;
+            }
+            branch_thread(exec, args) {
+                let thread = new Thread(this, exec, pids, args);
+                this.threads.push(thread);
+                thread.run(); // Start the thread after creation
             }
             add_thread(exec, args) {
                 this.threads.push(new Thread(this, exec, pids, args));
@@ -593,7 +630,11 @@ let errno;
                         if (c_process.pid === this.pid) interrupt();
                         break;
                 }
+                this.unfreeze();
                 this.waiting = false;
+            }
+            unfreeze() {
+                // Just here to prevent errors. This function is assigned by asyncwait()
             }
             kill() {
                 for (let i = 0; i < this.descriptor_table.length; i++) {
@@ -602,14 +643,72 @@ let errno;
                     this.close(i);
                 }
                 this.dead = true;
+                check_dead_processes();
+            }
+            check_dead() {
+                for(let thread of this.threads) {
+                    // Check if the process has no active threads
+                    if(!thread.done)
+                        return;
+                }
+                // If it has no active threads, it kills itself.
+                this.dead = true;
+                setInterval(check_dead_processes);
             }
             wait() {
                 this.waiting = true;
+            }
+            start() {
+                if(this.threads.length > 0) {
+                    this.threads[0].run(); // Execute main thread
+                } else {
+                    throw new Error("Cannot start process: no threads");
+                }
+            }
+            get_cpu_time(){
+                const time = get_time(3);
+                return time - this.time_created - this.waited
             }
         }
         let get_process = function (pid) {
             for (let process of processes)
                 if (process.pid === pid) return process;
+        }
+        let asyncwait = function(handler) {
+            let user = c_user;
+            let thread = c_thread;
+            let process = c_process;
+            
+            // Unassign context
+            // c_user = null;
+            // c_thread = null;
+            // c_process = null;
+
+            const time = get_time(3);
+
+            let post_wait = () => {
+                process.waited += get_time(3) - time;
+                c_user = user;
+                c_thread = thread;
+                c_process = process;
+            }
+            if(process.waiting) {
+                let unfreeze = process.unfreeze;
+                return new Promise(a => {
+                    process.unfreeze = () => {
+                        unfreeze();
+                        a();
+                    }
+                }).then(post_wait);
+            }
+            // If the process is dead, we make the promise unresolvable to prevent further execution.
+            if(process.dead) {
+                return new Promise(a => {});
+            }
+
+            return new Promise(resolve => {
+                handler(resolve);
+            }).then(post_wait);
         }
         getpid = syscall(function () {
             return c_process.pid;
@@ -629,11 +728,11 @@ let errno;
                 return -1;
             return process.pid;
         });
-        wait = syscall(function () {
+        wait = syscall(async function () {
             if (!c_process) panic("wait() was run outside of kernel context");
+            c_process.waiting = true;
             if (c_process.children.length !== 0)
-                c_process.waiting = true;
-            interrupt();
+                return asyncwait();
         });
         exec = syscall(function (path, ...args) {
             let file = get_file(path);
@@ -643,13 +742,13 @@ let errno;
             c_process.exec(code, args ?? [], full_path(path));
         });
         thread = syscall(function (exec, args) {
-            return c_process.add_thread(exec, args);
+            return c_process.branch_thread(exec, args);
         });
         cancel = syscall(function (pid) {
             c_process.cancel_thread(pid);
         });
-        sleep = syscall(function (time) {
-            c_thread.sleep = time;
+        sleep = syscall(async function (time) {
+            return asyncwait(a => setTimeout(a, time))
         });
         exit = syscall(function () {
             c_process.kill();
@@ -675,81 +774,17 @@ let errno;
             return c_process.working_path;
         });
 
-        // Scheduler
-        const max_proc_time = 100;
-        let threads = [];
-        function scheduler () {
-            const sched_start_time = get_time(3);
-            // Load ready threads into buffer
+        // Stateless Process Management
+        function check_dead_processes() {
             for (let i = 0; i < processes.length; i++) {
                 let process = processes[i];
-                if (process.is_available()) {
-                    for (let j = 0; j < process.threads.length; j++) {
-                        let thread = process.threads[j];
-                        if (thread.is_ready(sched_start_time) && !thread.queued) {
-                            threads.push(thread);
-                            thread.queued = true;
-                        }
-                    }
-                } else if (process.dead) {
+                if (process.dead) {
                     processes.splice(i, 1);
                     process.parent.signal(20);
                     i--;
                     continue;
                 }
             }
-            // Calculate load average
-            count_processes_load(sched_start_time);
-            // Run all queued threads
-            user_time = 0;
-            while (threads.length > 0) {
-                let thread = threads[0];
-                c_process = thread.process;
-                c_thread = thread;
-                c_user = thread.process.user;
-                let time = get_time(3);
-                if (time - sched_start_time > max_proc_time) break;
-                if (c_process.is_available()) {
-                    thread.last_exec = time;
-                    try {
-                        thread.run();
-                    } catch (e) {
-                        if (!is_interrupt(e)) {
-                            console.error(thread.process.cmdline + " (" + thread.process.pid + ") encountered an error (thread: " + thread.pid + ")");
-                            console.error(e);
-                            fprintf(stderr, thread.process.command + ": " + e.message + "\n");
-                            c_process.kill();
-                        }
-                    }
-                }
-                thread.queued = false;
-                threads.splice(0, 1);
-            }
-            c_process = null;
-            c_user = null;
-            c_thread = null;
-        }
-
-        // Power manager: take advantage of dynamic kernel clocking
-        let loop_timeout = 10;
-        let dynamic_clock = function () {
-            loop_timeout = 100;
-            let earliest_exec_time = Infinity;
-            let time = get_time(3);
-            for (let process of processes) {
-                if (process.is_available()) {
-                    for (let thread of process.threads) {
-                        if (thread.slept(time)) {
-                            kernel_main();
-                            kdebug("scheduler was early");
-                        }
-                        if (thread.sleep < earliest_exec_time && thread.sleep > 0)
-                            earliest_exec_time = thread.sleep;
-                    }
-                }
-            }
-            if (earliest_exec_time !== Infinity)
-                loop_timeout = earliest_exec_time
         }
 
         // Debug
@@ -912,7 +947,11 @@ let errno;
             }
             processes.push(new Process(init_code, 0, "/"));
         }
+        function run_init() {
+            processes[0].start();
+        }
         create_init();
+        run_init();
 
         // Javascript function reassignment. This will help prevent data loss
         system_shutdown = function () {
@@ -933,6 +972,7 @@ let errno;
         });
 
         // System management
+        let loop_timeout = 10;
         let reset = function () {
             for(let p of processes)
                 p.kill(); // Kill all processes
@@ -940,9 +980,7 @@ let errno;
         }
         function purge() {
             processes = [];
-            threads = [];
             pids = 1;
-            loop_timeout = 10;
         }
         function dirty_purge() {
             kwarn("Running dirty purge: all runtime kernel data will be completley lost");
@@ -955,13 +993,6 @@ let errno;
                 filesystem.inodes[0].mountpoint = null;
             }
             mount_table = [];
-        }
-        let stopped = false;
-        function stop_kernel() {
-            clearTimeout(kernel_timeout_id);
-            loop_timeout = Infinity; // Prevent further execution
-            entered = false; // Open the kernel to re-entry
-            stopped = true;
         }
         let rebooting = false;
         reboot = syscall(function (op) {
@@ -1038,9 +1069,9 @@ let errno;
         });
         sysinfo = syscall(function() {
             return {
-                loads: loadavg,
+                loads: [get_user_time()],
                 total_time: total_time,
-                user_time: user_time,
+                user_time: get_user_time(),
                 system_time: system_time,
                 uptime: round(get_uptime()/1000),
                 procs: processes.length,
@@ -1049,65 +1080,13 @@ let errno;
         })
 
         // Usage counters
-        let loadavg = [0, 0, 0];
-        function track_time(handler) {
-            let time = get_time(3);
-            handler();
-            return get_time(3) - time;
-        }
-        {
-            /* Based on Linux kernel source code */
-            const EXP_1 = 0.9200 /* 1/exp(5sec/1min) as fixed-point */
-            const EXP_5 = 0.9835 /* 1/exp(5sec/5min) */
-            const EXP_15 = 0.9945 /* 1/exp(5sec/15min) */
-            function calc_load(_load, exp, n) {
-                let load = _load;
-                load *= exp;
-                load += n * (1 - exp);
-                return round(load, 2);
+        function get_user_time() {
+            let t = 0;
+            const time = get_time(3);
+            for(let process of processes) {
+                t += time - process.time_created - process.waited;
             }
-            let last_counted = get_time(0);
-            let count = 0;
-            let times_run = 0;
-            function count_processes_load(time) {
-                count+=threads.length;
-                times_run++;
-                if(time - last_counted >= 5000) {
-                    const active_tasks = count / times_run;
-                    loadavg[0] = calc_load(loadavg[0], EXP_1, active_tasks);
-                    loadavg[1] = calc_load(loadavg[1], EXP_5, active_tasks);
-                    loadavg[2] = calc_load(loadavg[2], EXP_15, active_tasks);
-                    last_counted = time;
-                    count = 0;
-                    times_run = 0;
-                }
-            }
+            return t;
         }
-
-        // Execution loop
-        let total_time = 0;
-        kdebug("Beginning execution loop");
-        let kernel_main = () => {
-            try {
-                scheduler();
-                dynamic_clock();
-            } catch (e) {
-                panic("Critical error in kernel.");
-                console.error(e);
-            }
-        }
-        let kernel_timeout_id;
-        let kernel_loop = () => {
-            if(stopped) {
-                kerror("There was an attempt to run the kernel while stopped.");
-                return;
-            }
-            let time = get_time(3);
-            total_time = track_time(kernel_main);
-            kernel_timeout_id = setTimeout(kernel_loop, loop_timeout);
-            total_time = get_time(3) - time;
-            system_time = total_time - user_time;
-        }
-        kernel_loop(); // Start execution
     }
 }
