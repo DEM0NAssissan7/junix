@@ -9,31 +9,33 @@ let executed = false;
 const version_string = "sh 1.1"
 let init = false;
 let condition_met = true;
-this.main = function(args, envp) {
-    if(!init) {
-        env = envp;
-    
-        paths = get_variable_value("PATH", env).split(":");
-    
-        printf(version_string+"\n");
-        if(getuid() !== 0)
-            prompt = "$";
-        reprompt();
-        init = true;
+this.main = async function(args, envp) {
+    env = envp;
+
+    paths = get_variable_value("PATH", env).split(":");
+
+    printf(version_string+"\n");
+    if(getuid() !== 0)
+        prompt = "$";
+    reprompt();
+    init = true;
+
+    thread(readinput);
+    while(1) {
+        if(command_queue.length !== 0) {
+            await run_queue();
+        }
+        await sleep(30);
     }
-    if(command_queue.length !== 0) {
-        run_queue();
-        return;
-    }
-    if(executed) {
-        buffer = "";
-        reprompt();
-        executed = false;
-    }
-    let b = read(0);
-    if(b.length > 0) {
-        add_to_buffer(b)
-        run_queue();
+}
+
+async function readinput() {
+    while(true) {
+        let b = read(0);
+        if(b.length > 0) {
+            add_to_buffer(b);
+        }
+        await sleep(1);
     }
 }
 
@@ -283,20 +285,21 @@ function queue(command, args, conditional) {
         fprintf(stderr, e);
     }
 }
-function run_queue() {
-    if(command_queue.length !== 0) {
+async function run_queue() {
+    let was_successful = false;
+    while(command_queue.length !== 0) {
         let cmd = command_queue[0];
         if(cmd[2]) {
-            if(condition_met)
-                condition_met = execute_command(cmd[0], cmd[1]) ? false : true;
-        } else
-            condition_met = execute_command(cmd[0], cmd[1]) ? false : true;
+            if(!was_successful)
+                continue;
+        }
+        was_successful = await execute_command(cmd[0], cmd[1]) ? false : true;
         command_queue.splice(0, 1);
-        if(command_queue.length !== 0)
-            sleep(1)
     }
+    reprompt();
+    buffer = "";
 }
-function execute_command(command, args) {
+async function execute_command(command, args) {
     executed = true;
 
     let callback = internal_commands.find(a => {
@@ -318,7 +321,7 @@ function execute_command(command, args) {
             cmdline = find_path(command) + "/" + command;
         if(!access(cmdline)) {
             fprintf(stderr, command + " not found\n");
-            return 1;
+            return true;
         }
         let fd = fopen(cmdline, "r");
         let data = read(fd);
@@ -331,11 +334,12 @@ function execute_command(command, args) {
             fork(() => {
                 exec(cmdline, args, env);
             });
-            wait();
+            await wait();
         } catch (e) {
             if(!is_interrupt(e))
                 fprintf(stderr, "sh: " + e + "\n");
             return 1;
         }
     }
+    return true;
 }

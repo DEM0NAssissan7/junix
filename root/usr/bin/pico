@@ -4,7 +4,7 @@ let cursor = 0;
 let filename = "";
 let dir = "";
 let filetype;
-this.main = function(args) {
+this.main = async function(args) {
     let path = args[0];
     filename = get_filename(path);
     dir = dirname(path);
@@ -30,8 +30,44 @@ this.main = function(args) {
     fclose(fd);
     
     draw_screen();
-    thread(read_input);
-    sleep(-1);
+    while(true) {
+        let b = read(stdin);
+        if(b.length > 0) {
+            // Do key things
+            switch(b) {
+                case "Escape":
+                    write_changes();
+                    return 0;
+                case "\x03": // Left
+                    move_cursor(-1)
+                    break;
+                case "\x01": // Right
+                    move_cursor(1)
+                    break;
+                case "\x00": // Up
+                    move_vertically(true);
+                    break;
+                case "\x02": // Down
+                    move_vertically(false);
+                    break;
+                default:
+                    for(let char of b) {
+                        switch(char) {
+                            case '\b':
+                                buffer = del_char(buffer, cursor);
+                                move_cursor(-1)
+                                break;
+                            default:
+                                buffer = place_char(buffer, char, cursor);
+                                move_cursor(1);
+                                break;
+                        }
+                    }
+            }
+            draw_screen();
+        }    
+        await sleep(5);
+    }
 }
 
 function write_changes() {
@@ -79,44 +115,6 @@ function move_vertically(up) {
         if(hor_offset > next_line_size)
             hor_offset = next_line_size;
         move_cursor(next_newline + hor_offset);
-    }
-}
-function read_input() {
-    let b = read(stdin);
-    if(b.length > 0) {
-        // Do key things
-        switch(b) {
-            case "Escape":
-                write_changes();
-                exit();
-                break;
-            case "\x03": // Left
-                move_cursor(-1)
-                break;
-            case "\x01": // Right
-                move_cursor(1)
-                break;
-            case "\x00": // Up
-                move_vertically(true);
-                break;
-            case "\x02": // Down
-                move_vertically(false);
-                break;
-            default:
-                for(let char of b) {
-                    switch(char) {
-                        case '\b':
-                            buffer = del_char(buffer, cursor);
-                            move_cursor(-1)
-                            break;
-                        default:
-                            buffer = place_char(buffer, char, cursor);
-                            move_cursor(1);
-                            break;
-                    }
-                }
-        }
-        draw_screen();
     }
 }
 function draw_screen() {

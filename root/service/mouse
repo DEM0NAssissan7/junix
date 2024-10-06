@@ -7,18 +7,22 @@ let mouse = {
     vectorX: 0,
     vectorY: 0
 }
-this.main = function() {
+this.main = async function() {
     if(!init) {
         fd = fopen("/dev/mouse", "w");
         printf("Created /dev/mouse device\n");
         init = true;
     }
-    if(mouse_moved) {
-        write(fd, mouse);
-        mouse_moved = false;
-    } else {
-        mouse.vectorX = 0;
-        mouse.vectorY = 0;
+
+    while(1) {
+        if(mouse_moved) {
+            write(fd, mouse);
+            mouse_moved = false;
+        } else {
+            mouse.vectorX = 0;
+            mouse.vectorY = 0;
+        }
+        await sleep(5)
     }
 }
 document.onmousemove = e => {

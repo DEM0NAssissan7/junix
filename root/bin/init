@@ -1,8 +1,7 @@
 // JUNIX Init system: inspired by FreeBSD rc
 let fd, loginconf;
-let pid;
 let started = false;
-this.main = () => {
+this.main = async function() {
     if(getpid() !== 1) {
         fprintf(stderr, "init can only run on PID 1\n");
         exit();
@@ -29,10 +28,10 @@ this.main = () => {
         close(stdin);
         close(stdout);
         close(stderr);
+        await sleep(100);
     
-        pid = thread(post_driver);
+        post_driver();
         started = true;
-        sleep(-1);
     } else {
         fprintf(stderr, "Running init after starting: something is going on.");
     }
@@ -40,11 +39,6 @@ this.main = () => {
 let wait = false;
 let finished = false;
 function post_driver() {
-    if(!wait) { // Allow the drivers to initialize before starting /etc/rc
-        wait = true;
-        return;
-    }
-    if(finished) return;
     console.log("Running post driver-init");
     // Create stdin, stdout, and stderr
     open("/dev/keyboard", "r"); // Stdin
@@ -69,7 +63,6 @@ function post_driver() {
     }
     printf("\n\n");
 
-    cancel(pid);
     wait = true;
     finished = true;
 }

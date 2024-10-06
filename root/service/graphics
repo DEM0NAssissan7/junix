@@ -4,22 +4,24 @@ let init = false;
 const framebuffer_device = "/dev/fbdev";
 const console_device = "/dev/console";
 const ctx_device = "/dev/ctx";
-this.main = function() {
-    if(!init) {
-        init_console();
-        init_framebuffer();
-        init_window();
-        init = true;
-    }
-    check_mode();
-    switch(mode) {
-        case "console":
-            update_console();
-            break;
-        case "framebuffer":
-            break;
-        default:
-            throw new Error("Mode is invalid");
+this.main = async function() {
+
+    init_console();
+    init_framebuffer();
+    init_window();
+
+    while(true) {
+        check_mode();
+        switch(mode) {
+            case "console":
+                update_console();
+                break;
+            case "framebuffer":
+                break;
+            default:
+                throw new Error("Mode is invalid");
+        }
+        await sleep(30);
     }
 }
 
@@ -51,7 +53,6 @@ function update_console() {
     if(string.length > 0)
         console_element.innerText = buff
     write(console_fd, "");
-    sleep(30)
 }
 
 /* Graphics mode */

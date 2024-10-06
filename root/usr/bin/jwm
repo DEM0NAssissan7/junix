@@ -1,17 +1,21 @@
 // Reference jwmlib implementation. Helps debugging.
 
-let init = false;
-this.main = function (argc, envp) {
-    if (!init) {
-        load("libjwm", envp);
-        ldlibs(argc, envp);
-        init_wm();
-        init = true;
-        return;
-    }
-    update_wm(false, draw_loop);
-}
+this.main = async function (argc, envp) {
+    load("libjwm", envp);
+    ldlibs(argc, envp);
+    init_wm(envp);
 
-function draw_loop() {
-    display_framerate();
+    while(1) {
+        request_update = detect_wm_changes();
+        if (request_update) {
+            draw_background();
+    
+            display_framerate();
+    
+            // Render cursor
+            render_cursor();
+            request_update = false;
+        }
+        await sleep(1000 / framerate);
+    }
 }

@@ -75,7 +75,7 @@ let detect_wm_changes = () => {
     }
     return false;
 }
-function init_wm(envp) {
+async function init_wm(envp) {
     if(!wm_has_init) {
         framebuff_fd = fopen(framebuffer_device, "w");
         mouse_fd = fopen(mouse_device, "r");
@@ -94,16 +94,16 @@ function init_wm(envp) {
         ctx_fd = fopen(ctx_device, "r");
         ctx = read(ctx_fd);
         create_cursor_image(default_cursor_handler);
-        update_wm(true);
+        await update_wm(true);
 
         let runtime_dir = "/run/wm/1"
-        set_variable_value("RUNTIME_DIR", runtime_dir);
+        set_variable_value("RUNTIME_DIR", runtime_dir, envp);
         
         wm_has_init = true
     }
 }
 
-function update_wm(force_run, handler) {
+async function update_wm(force_run, handler) {
     request_update = detect_wm_changes();
     if (request_update || force_run) {
         draw_background();
@@ -113,7 +113,7 @@ function update_wm(force_run, handler) {
         render_cursor();
         request_update = false;
     }
-    sleep(1000 / framerate);
+    await sleep(1000 / framerate);
 }
 
 function create_cursor_image(handler) {
