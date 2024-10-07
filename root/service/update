@@ -1,0 +1,4 @@
+this.main = function() {
+    exec("/usr/bin/junixupd", []);
+    return 0;
+}

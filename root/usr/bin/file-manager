@@ -1,0 +1,47 @@
+let path = "/";
+let fd;
+
+this.main = async function (argc, envp) {
+    load("libjwm", envp);
+    load("jtk", envp);
+    ldlibs(argc, envp);
+
+    set_framerate(60)
+    jtk_init(envp, "Files", 600, 400);
+    fd = opendir(".");
+
+    while(true) {
+        await jtk_draw(app_draw);
+    }
+}
+
+function switch_path(_p) {
+    let t = stat(_p).type;
+    switch(t) {
+        case "d":
+            fclose(fd);
+            chdir(_p)
+            fd = opendir(".");
+            break;
+    }
+}
+
+function app_draw(ctx, events) {
+    set_state(ctx, events);
+    backdrop();
+
+    text_button(10, 10, 15, 15, () => switch_path(".."), "^");
+
+    let names = listdir(fd);
+    const icon_width = 60;
+    const icon_height = 60;
+    for(let i = 0; i < names.length; i++) {
+        let _x = 30 + i * (icon_width + 5);
+        let y = 30 + Math.floor(_x / ctx.canvas.width) * (icon_height + 5);
+        let x = _x % ctx.canvas.width;
+        let name = names[i];
+        text_button(x, y, icon_width, icon_height, () => switch_path(name), name);
+    }
+
+    draw_top_bar();
+}

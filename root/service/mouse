@@ -5,30 +5,40 @@ let mouse = {
     x: 0,
     y: 0,
     vectorX: 0,
-    vectorY: 0
+    vectorY: 0,
+    down: false
 }
-this.main = function() {
+this.main = async function() {
     if(!init) {
         fd = fopen("/dev/mouse", "w");
         printf("Created /dev/mouse device\n");
         init = true;
     }
-    if(mouse_moved) {
-        write(fd, mouse);
-        mouse_moved = false;
-    } else {
-        mouse.vectorX = 0;
-        mouse.vectorY = 0;
+
+    while(1) {
+        if(mouse_moved) {
+            write(fd, mouse);
+            mouse_moved = false;
+        } else {
+            mouse.vectorX = 0;
+            mouse.vectorY = 0;
+        }
+        await sleep(5)
     }
 }
 document.onmousemove = e => {
     let x = e.x - 16;
     let y = e.y - 16;
-    mouse = {
-        x: x,
-        y: y,
-        vectorX: x - mouse.x,
-        vectorY: y - mouse.y
-    }
+    mouse.vectorX = x - mouse.x;
+    mouse.vectorY = y - mouse.y;
+    mouse.x = x;
+    mouse.y = y;
+
     mouse_moved = true;
+}
+document.onmousedown = e => {
+    mouse.down = true;
+}
+document.onmouseup = e => {
+    mouse.down = false;
 }

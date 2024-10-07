@@ -113,12 +113,21 @@ class JFS {
         this.magic = obj.magic;
         this.uuid = obj.uuid;
     }
+    check_duplicate(parent_index, inode) {
+        let parent_children = this.get_inode(parent_index).get_data();
+        for(let index of parent_children) {
+            let _inode = this.get_inode(index);
+            if(_inode.filename === inode.filename)
+                throw new Error("Cannot create file: file '" + inode.filename + "' already exists");
+        }
+    }
     create_file(parent_index, filename, data, type, user, mode) {
         let inode = new Inode(-1, parent_index, filename, data, type, user, mode);
         this.push_inode(parent_index, inode);
         return inode;
     }
     push_inode(parent_index, inode) {
+        this.check_duplicate(parent_index, inode)
         let parent_inode = this.get_inode(parent_index);
         let index = this.inodes.length;
         for(let i = 1; i < this.inodes.length; i++) {

@@ -1,6 +1,6 @@
 let disks = 1;
 let fd;
-this.main = function() {
+this.main = async function() {
     try {
         let string, fd, fs;
         let success = false;
@@ -26,14 +26,16 @@ this.main = function() {
         printf("On-device storage initialized\n");
     }
     fd = fopen("/dev/localstorage", "w");
-    sleep(-1);
     sync();
-    thread(call_watcher, []);
     thread(sync_disks);
+    while(true) {
+        call_watcher()
+        await sleep(100);
+    }
 }
-function sync_disks() {
+async function sync_disks() {
     sync(); // Sync disks every 30 seconds
-    sleep(1000 * 30);
+    await sleep(1000 * 30);
 }
 function initiate_fs(fs, disk_id) {
     fs.sync = function() {

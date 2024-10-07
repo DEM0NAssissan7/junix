@@ -1,9 +1,7 @@
 {
     const lib_varname = "LIBS";
     const pid_varname = "LIBPID";
-    const tmp_exec = "/tmp/prgm.js";
     let is_loaded = (envp) => {
-        console.log(envp);
         return get_variable_value(pid_varname, envp) === getpid();
     }
     let eliminate_func = (string) => {
@@ -31,18 +29,17 @@
         let fd = fopen(getexe(), "r");
         let code = eliminate_func(read(fd).toString());
         fclose(fd);
+        let tmp_exec = getexe() + ".ld";
         fd = fopen(tmp_exec, "w");
 
         let c;
         let add_lib = (path) => {
             let _fd = fopen(path, "r");
-            console.log(path)
             c = read(_fd).toString();
 
             // We need to eliminate the file's function(){...} part so that we can combine the library as part of the program's function
             c = eliminate_func(c) + "\n";
 
-            console.log(c);
             fclose(_fd);
             c += code;
             code = c;
@@ -72,7 +69,6 @@
         }
 
         let F = new Function("return function(){" + code + "}");
-        F.name = "func";
         write(fd, F());
         fclose(fd);
 
@@ -80,6 +76,7 @@
         fork(() => {
             set_variable_value(pid_varname, getpid(), envp);
             exec(tmp_exec, argc, envp);
+            unlink(tmp_exec); // Clean up temporary executable
         });
         exit();
     }

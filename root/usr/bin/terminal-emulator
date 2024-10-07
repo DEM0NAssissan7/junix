@@ -1,0 +1,131 @@
+/* The terminal contains a userspace driver to render text to the screen
+*/
+const default_shell = "/bin/sh";
+const stdin_stdout_name = "/dev/vtty";
+const line_size = 12;
+const char_width = 8;
+const char_height = 12;
+let infd, outfd;
+let tin, tout;
+let lines = [];
+let current_line = 0;
+
+
+this.main = async function (argc, envp) {
+    load("libjwm", envp);
+    load("jtk", envp);
+    ldlibs(argc, envp);
+
+    jtk_init(envp, "Terminal", 500, 400);
+
+    create_stdin_stdout();
+    thread(io);
+    exec_shell(argc, envp, default_shell);
+    set_framerate(40);
+    ctx.font = "11px monospace"
+    while(true) {
+        await jtk_draw(app_draw);
+    }
+}
+
+function create_stdin_stdout() {
+    for(let i = 0;true;i++) {
+        const prefix = stdin_stdout_name + i;
+        if(!access(prefix + "o")) {
+            // Stdout
+            infd = fopen(prefix + "i", "w");
+            outfd = fopen(prefix + "o", "w");
+            
+            write(infd, "");
+            write(outfd, "");
+
+            tin = prefix + "i";
+            tout = prefix + "o";
+            reset_buffer();
+            return;
+        }
+    }
+}
+
+function reset_buffer() {
+    current_line = 0;
+    for(let i = 0; (i + 4) * line_size < ctx.canvas.height; i++) {
+        lines[i] = "";
+    }
+}
+
+async function io() {
+    while(true) {
+        let max_chars_width = Math.floor(ctx.canvas.width / char_width);
+        let chars = read(outfd);
+    
+        if(chars.length > 0) {
+            for(let char of chars) {
+                let line = lines[current_line];
+                // Horizontal overflow
+                if(line.length >= max_chars_width)
+                    current_line++;
+        
+                switch(char) {
+                    case '\b':
+                        lines[current_line] = line.substr(0, line.length - 1);
+                        break;
+                    case '\n':
+                        current_line++;
+                        break;
+                    case '\?':
+                        reset_buffer();
+                        break;
+                    default:
+                        lines[current_line] += char;
+                        break;
+                }
+        
+                // Vertical overflow
+                if(current_line >= lines.length) {
+                    // Shift all lines up
+                    for(let i = 0; i < lines.length; i++) {
+                        lines[i - 1] = lines[i];
+                    }
+        
+                    // Keep current line at the bottom
+                    current_line--;
+
+                    lines[current_line] = "";
+                }
+            }
+            write(outfd, "");
+        }
+    
+        write(infd, events.key);
+        await sleep(1);
+    }
+}
+
+function exec_shell(argc, envp, shell) {
+    fork(() => {
+        close(stdin);
+        close(stdout);
+        close(stderr);
+
+        open(tin, "r");
+        open(tout, "a");
+        dup(stdout);
+
+        exec(shell, argc, envp);
+    })
+}
+
+function app_draw(ctx, events) {
+    set_state(ctx, events);
+    backdrop();
+
+    // Render text
+    for(let i = 0; i < lines.length; i++) {
+        if(lines[i].length > 0) {
+            text(lines[i], 2, (i + 1) * line_size);
+        }
+    }
+
+    draw_top_bar();
+}

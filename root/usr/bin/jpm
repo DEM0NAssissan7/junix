@@ -1,0 +1,5 @@
+/* JUNIX Package Manager
+
+This program has mainly two goals: install and uninstall packages
+Packages are contained using the tar library and all files modified are registered in the system directory /etc/jpm/db
+*/

@@ -5,11 +5,14 @@ function keyupdate() {
     write(fd, keys);
     keys = "";
 }
-this.main = function() {
+this.main = async function() {
     fd = fopen("/dev/keyboard", "w", 777);
-    thread(keyupdate, []);
     printf("Created keyboard driver\n");
-    sleep(-1);
+
+    while(true) {
+        keyupdate();
+        await sleep(1);
+    }
 }
 
 const key_replacements = [
@@ -35,7 +38,7 @@ function replace_keys(key) {
 }
 
 document.addEventListener("keydown", (e) => {
-    keys += replace_keys(e.key);
+    keys = replace_keys(e.key);
     e.preventDefault();
 });
 
