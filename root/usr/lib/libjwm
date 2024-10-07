@@ -105,17 +105,23 @@ let detect_wm_changes = () => {
     return false;
 }
 
+let window_count = 0;
 class WMctl {
     constructor(width, height) {
         this.width = width;
         this.height = height;
     }
     push_window(window) {
-        window.id = windows.length;
+        window.id = window_count++;
         windows.push(window);
     }
     close_window(window) {
-        windows[window.id] = undefined;
+        for(let i = 0; i < windows.length; i++) {
+            if(windows[i].id === window.id) {
+                windows.splice(i, 1);
+                break;
+            }
+        }
     }
 }
 
@@ -149,7 +155,6 @@ async function init_wm(envp) {
     mkdir("/run/wm");
     create_wmctl(runtime_dir, _window.width, _window.height);
     set_variable_value("RUNTIME_DIR", runtime_dir, envp);
-    console.log("HELLO", envp);
 }
 
 function update_wm(force_run, handler) {
