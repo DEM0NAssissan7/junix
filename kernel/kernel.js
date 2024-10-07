@@ -6,7 +6,7 @@ Main objectives:
 - Behave as close as possible to a real UNIX-like OS (e.g. syscall names and behaviors)
 
 Features:
-- Stateless (the kernel doesn't actively run any processes)
+- Passive Scheduler (the kernel doesn't actively run any processes)
 - Microkernel: The userspace programs take care of the drivers
 
 TODO:
@@ -224,7 +224,7 @@ let errno;
             let file = get_file(path);
             let inode = file.inode;
             if (file.incomplete) {
-                if (flags === "r") throw new Error("File " + path + " does not exist");
+                if (flags === "r" || file.noparent) throw new Error("File " + path + " does not exist");
                 kdebug("Creating file at " + path);
                 inode = file.filesystem.create_file(inode.index, get_filename(path), "", "-", c_user, mode ?? inode.mode);
             }
@@ -417,7 +417,8 @@ let errno;
             return {
                 filesystem: filesystem,
                 inode: inode,
-                incomplete: steps !== 0
+                incomplete: steps !== 0,
+                noparent: steps > 1
             };
         }
 
@@ -425,7 +426,7 @@ let errno;
         let processes = [];
         let pids = 1;
         let user_time = 0;
-        let c_process, c_user, c_thread;
+        let c_process, c_thread, c_user;
         class Thread {
             constructor(process, exec, pid, args) {
                 this.process = process;
@@ -748,7 +749,11 @@ let errno;
             c_process.cancel_thread(pid);
         });
         sleep = syscall(async function (time) {
-            return asyncwait(a => setTimeout(a, time))
+            let process = c_process;
+            return asyncwait(a => setTimeout(() => {
+                if(!process.dead)
+                    a();
+            }, time))
         });
         exit = syscall(function () {
             c_process.kill();
@@ -774,7 +779,7 @@ let errno;
             return c_process.working_path;
         });
 
-        // Stateless Process Management
+        // Passive Process Management
         function check_dead_processes() {
             for (let i = 0; i < processes.length; i++) {
                 let process = processes[i];

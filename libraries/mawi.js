@@ -208,9 +208,6 @@ function set_variable_value(identifier, value, deftable) {
     deftable.push([identifier, value]); // Add the entry if it does not exist
     return deftable;
 }
-function map_options(args) {
-
-}
 
 function random(min, max, accuracy) {
     let digits = raise_ten_to(accuracy ?? 0);

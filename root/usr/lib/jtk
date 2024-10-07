@@ -1,0 +1,123 @@
+let jtk_window;
+let topbarheight = 0;
+
+const theme = {
+    accent: '#466EFF',
+    background: "black",
+    element: "#1E1E1E",
+    text: "white",
+};
+
+function jtk_init(envp, title, width, height) {
+    init_client(envp);
+    jtk_window = create_window(title, width, height);
+    ctx = jtk_window.ctx;
+    events = jtk_window.events;
+    thread(mouse_thread);
+}
+
+async function jtk_draw(handler) {
+    jtk_window.draw(handler);
+    await sleep(1000/framerate);
+}
+
+let events;
+
+function set_state(_ctx, _events) {
+    ctx = ctx;
+    events = _events;
+}
+function backdrop() {
+    ctx.fillStyle = theme.background;
+    ctx.fillRect(0, topbarheight, jtk_window.canvas.width, jtk_window.canvas.height - topbarheight);
+}
+
+async function mouse_thread() {
+    while(true) {
+        if(events) {
+            if(!events.mouse.down) {
+                events.mouse.pressed = false;
+                is_dragged = false;
+            }
+        }
+        await sleep(3);
+    }
+}
+
+/* Common */
+let is_dragged = false;
+function draw_top_bar() {
+    topbarheight = 20;
+    // Bar
+    ctx.fillStyle = theme.element;
+    ctx.fillRect(0, 0, ctx.canvas.width, topbarheight);
+
+    // Movement
+    let mouse = events.mouse;
+    if(((mouse.x > 0 && mouse.x < ctx.canvas.width
+        && mouse.y > 0 && mouse.y < topbarheight) || is_dragged)
+        && mouse.down
+    ) {
+        if(!mouse.pressed && !is_dragged){
+            mouse.initX = mouse.x + jtk_window.x;
+            mouse.initY = mouse.y + jtk_window.y;
+            mouse.wininitX = jtk_window.x;
+            mouse.wininitY = jtk_window.y;
+            mouse.pressed = true;
+            is_dragged = true;
+        }
+        jtk_window.x = mouse.wininitX + ((mouse.x + jtk_window.x) - mouse.initX)
+        jtk_window.y = mouse.wininitY + ((mouse.y + jtk_window.y) - mouse.initY)
+    }
+
+    // Close button
+    const btn_width = 14;
+    const btn_height = 14;
+    ctx.fillStyle = "red";
+    jtk_btn(ctx.canvas.width - btn_width - 4, topbarheight / 2 - btn_height / 2, btn_width, btn_height);
+}
+
+
+/* Tools */
+
+function button(x, _y, w, h, func) {
+    let y = _y + topbarheight;
+    if (events.mouse.x > x && events.mouse.x < x + w && events.mouse.y > y && events.mouse.y < y + h) {
+        ctx.strokeStyle = theme.accent;
+        ctx.lineWidth = 1.8;
+
+        if(events.mouse.down && !events.mouse.pressed){
+            func();
+            events.mouse.pressed = true;
+        }
+    }else{
+        ctx.strokeStyle = theme.element;
+    }
+    ctx.fillStyle = theme.element;
+    
+    jtk_btn(x, y, w, h);
+}
+
+function jtk_btn(x, y, w, h) {
+    ctx.beginPath();
+    ctx.moveTo(x,y);
+    ctx.lineTo(x,y);
+    ctx.lineTo(x+w, y);
+    ctx.lineTo(x+w,y+h);
+    ctx.lineTo(x,y+h);
+    ctx.lineTo(x,y);
+    ctx.lineTo(x+w, y);
+    ctx.fill();
+    ctx.stroke();
+}
+
+function text_button(x, y, w, h, func, _text) {
+    button(x, y, w, h, func);
+    text(_text, x + w/2, y + h+ 5);
+}
+
+function text(text, x, _y, max_width) {
+    let y = _y + topbarheight;
+    ctx.fillStyle = theme.text;
+    ctx.fillText(text, x, y, max_width);
+}

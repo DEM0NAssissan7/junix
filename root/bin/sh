@@ -6,8 +6,7 @@ const cursor_char = "_";
 let paths = [];
 let env;
 let executed = false;
-const version_string = "sh 1.1"
-let init = false;
+const version_string = "sh 1.2";
 let condition_met = true;
 this.main = async function(args, envp) {
     env = envp;
@@ -17,10 +16,9 @@ this.main = async function(args, envp) {
     printf(version_string+"\n");
     if(getuid() !== 0)
         prompt = "$";
-    reprompt();
-    init = true;
 
     thread(readinput);
+    reprompt();
     while(1) {
         if(command_queue.length !== 0) {
             await run_queue();
@@ -130,8 +128,7 @@ function add_to_buffer(b) {
                     previous_buffers.splice(0, 0, buffer);
                     parse_input(buffer);
                     break;
-                }
-                else
+                } else
                     reprompt();
                 break;
             case '\t':
@@ -312,6 +309,8 @@ async function execute_command(command, args) {
         } catch (e) {
             if(!is_interrupt(e))
                 fprintf(stderr, "sh: "+e+"\n")
+            else
+                interrupt();
         }
     } else {
         let cmdline;

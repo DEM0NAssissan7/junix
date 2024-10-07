@@ -3,13 +3,6 @@ const mouse_device = "/dev/mouse";
 const ctx_device = "/dev/ctx";
 const wm_interface = "/run/wm/";
 
-const default_window_size = {width: 400, height: 400};
-
-class WM {
-    CREATE_WINDOW = 0;
-    WINDOW_UPDATE = 1;
-}
-
 let wm_has_init = false;
 let framerate = 0;
 let persistent_frames = 0;
@@ -18,23 +11,54 @@ let framebuff_fd, mouse_fd, ctx, ctx_fd;
 let request_update = true;
 let cursor_canvas = new OffscreenCanvas(16, 16);
 let wallpaper_canvas;
-let windows = [];
 
-let window;
+let focused_index = 0;
+
+let ctl;
+let display = {
+    width: 400,
+    height: 400
+}
 
 /* General Window Structures */
+let windows = [];
 class Win {
-    constructor() {
-        this.resize(default_window_size.width, default_window_size.height)
+    events = {
+        mouse: {
+            x: 0,
+            y: 0,
+            vectorX: 0,
+            vectorY: 0,
+            down: false
+        },
+        key: ""
+    }
+    constructor(title, width, height) {
+        this.resize(width, height)
+        this.title = title;
+        this.update = false;
+        this.x = display.width / 2 - width / 2;
+        this.y = display.height / 2 - height /2;
     }
     resize(width, height) {
-        this.width = width;
-        this.height = height;
-        this.canvas = new OffscreenCanvas(this.width, this.height);
+        this.canvas = new OffscreenCanvas(width, height);
         this.ctx = this.canvas.getContext("2d");
     }
-    run() {
-        
+    draw(handler) {
+        handler(this.ctx, this.events);
+        this.update = true;
+    }
+    close() {
+        ctl.close_window(this);
+    }
+    render(ctx) {
+        ctx.drawImage(this.canvas, this.x, this.y);
+    }
+}
+function draw_windows() {
+    for(let window of windows) {
+        window.render(ctx);
+        window.update = false;
     }
 }
 
@@ -63,47 +87,72 @@ set_framerate(100);
 }
 let detect_wm_changes = () => {
     let mouse = read(mouse_fd);
-    if (round(mouse.vectorX, 4) !== 0 || round(mouse.vectorY, 4) !== 0) {
+    if (mouse.vectorX !== 0 || mouse.vectorY !== 0) {
         active_persistence = persistent_frames;
         return true;
     }
-    // Allow frames to persist running even when there are no changes. Makes the system more consistent.
-    if(active_persistence > 0) {
-        console.log(active_persistence);
-        active_persistence--;
-        return true;
+    // See if any windows want to update
+    for(let window of windows) {
+        if(window.update)
+            return true;
     }
+    // Allow frames to persist running even when there are no changes. Makes the system more consistent.
+    // if(active_persistence > 0) {
+    //     console.log(active_persistence);
+    //     active_persistence--;
+    //     return true;
+    // }
     return false;
 }
-async function init_wm(envp) {
-    if(!wm_has_init) {
-        framebuff_fd = fopen(framebuffer_device, "w");
-        mouse_fd = fopen(mouse_device, "r");
-        // Set mode
-        let window_fd = fopen("/dev/window", "r");
-        let _window = read(window_fd);
-        write(framebuff_fd, {
-            modeset: true,
-            width: _window.width - 16,
-            height: _window.height - 16
-        });
-        wallpaper_canvas = new OffscreenCanvas(_window.width, _window.height);
-        create_default_wallpaper();
-        fclose(window_fd);
-    
-        ctx_fd = fopen(ctx_device, "r");
-        ctx = read(ctx_fd);
-        create_cursor_image(default_cursor_handler);
-        await update_wm(true);
 
-        let runtime_dir = "/run/wm/1"
-        set_variable_value("RUNTIME_DIR", runtime_dir, envp);
-        
-        wm_has_init = true
+class WMctl {
+    constructor(width, height) {
+        this.width = width;
+        this.height = height;
+    }
+    push_window(window) {
+        window.id = windows.length;
+        windows.push(window);
+    }
+    close_window(window) {
+        windows[window.id] = undefined;
     }
 }
 
-async function update_wm(force_run, handler) {
+function create_wmctl(runtime_dir, width, height) {
+    let fd = fopen(runtime_dir, "w");
+    write(fd, new WMctl(width, height));
+    fclose(fd);
+}
+
+async function init_wm(envp) {
+    framebuff_fd = fopen(framebuffer_device, "w");
+    mouse_fd = fopen(mouse_device, "r");
+    // Set mode
+    let window_fd = fopen("/dev/window", "r");
+    let _window = read(window_fd);
+    write(framebuff_fd, {
+        modeset: true,
+        width: _window.width - 16,
+        height: _window.height - 16
+    });
+    wallpaper_canvas = new OffscreenCanvas(_window.width, _window.height);
+    create_default_wallpaper();
+    fclose(window_fd);
+
+    ctx_fd = fopen(ctx_device, "r");
+    ctx = read(ctx_fd);
+    create_cursor_image(default_cursor_handler);
+    update_wm(true);
+
+    const runtime_dir = "/run/wm/wmctl";
+    mkdir("/run/wm");
+    create_wmctl(runtime_dir, _window.width, _window.height);
+    set_variable_value("RUNTIME_DIR", runtime_dir, envp);
+    console.log("HELLO", envp);
+}
+
+function update_wm(force_run, handler) {
     request_update = detect_wm_changes();
     if (request_update || force_run) {
         draw_background();
@@ -113,7 +162,25 @@ async function update_wm(force_run, handler) {
         render_cursor();
         request_update = false;
     }
-    await sleep(1000 / framerate);
+}
+function get_focused_window() {
+    // TODO
+    return focused_index;
+}
+function send_events() {
+    for(let window of windows) {
+        window.events.key = ""; // Clear the key buffer
+    }
+
+    let window = windows[focused_index];
+    let mouse = read(mouse_fd);
+    let key = read(stdin);
+
+    let _mouse = window.events.mouse;
+    _mouse.x = mouse.x - window.x;
+    _mouse.y = mouse.y - window.y;
+    _mouse.down = mouse.down;
+    window.events.key = key;
 }
 
 function create_cursor_image(handler) {
@@ -155,34 +222,28 @@ function create_default_wallpaper() {
     _ctx.fillRect(0, 0, wallpaper_canvas.width, wallpaper_canvas.height);
 }
 
-/* Window Creation */
+/* Client Operations */
 
-function get_wm_info() {
-    let fd = fopen(wm_interface + getpid() + "a", "r");
-    let r = read(fd)
-    fclose
-    return r;
-}
-function send_wm_message(type, data) {
-    let fd = fopen(wm_interface, "r");
-    let interface_obj = read(fd);
-    switch(type) {
-        case WM.CREATE_WINDOW:
-            interface_obj.push({
-                type: type,
-                data: data,
-                pid: getpid()
-            });
-            break;
-        
-    }
+function get_controller(envp) {
+    let runtime_dir = get_variable_value("RUNTIME_DIR", envp);
+
+    let fd = fopen(runtime_dir, "r");
+    let controller = read(fd);
     fclose(fd);
+    return controller;
 }
-function has_fifo() {
-    if(!access(wm_interface + getpid() + "a"))
-        return false;
-    return true;
+function init_client(envp) {
+    ctl = get_controller(envp);
+    display = {
+        width: ctl.width,
+        height: ctl.height
+    }
 }
-function create_window(title, ) {
-
+function create_window(title, width, height) {
+    let win = new Win(title, width, height);
+    ctl.push_window(win);
+    return win;
+}
+function destroy_window(window) {
+    ctl.close_window(window);
 }

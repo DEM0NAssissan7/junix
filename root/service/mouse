@@ -5,7 +5,8 @@ let mouse = {
     x: 0,
     y: 0,
     vectorX: 0,
-    vectorY: 0
+    vectorY: 0,
+    down: false
 }
 this.main = async function() {
     if(!init) {
@@ -28,11 +29,16 @@ this.main = async function() {
 document.onmousemove = e => {
     let x = e.x - 16;
     let y = e.y - 16;
-    mouse = {
-        x: x,
-        y: y,
-        vectorX: x - mouse.x,
-        vectorY: y - mouse.y
-    }
+    mouse.vectorX = x - mouse.x;
+    mouse.vectorY = y - mouse.y;
+    mouse.x = x;
+    mouse.y = y;
+
     mouse_moved = true;
+}
+document.onmousedown = e => {
+    mouse.down = true;
+}
+document.onmouseup = e => {
+    mouse.down = false;
 }
