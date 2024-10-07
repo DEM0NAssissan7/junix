@@ -76,6 +76,7 @@
         fork(() => {
             set_variable_value(pid_varname, getpid(), envp);
             exec(tmp_exec, argc, envp);
+            unlink(tmp_exec); // Clean up temporary executable
         });
         exit();
     }
