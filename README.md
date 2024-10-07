@@ -19,5 +19,4 @@ Of course, the core of the entire system that pulls everything together is the k
 - **Userland** is made to behave like any other UNIX-like system, but where needed, it mostly follows the FreeBSD system of things.
 
 # TODO
-- Implement library loading instead of making all libraries in the global scope
-- Possibly integrate machine code interpretation/real 
+- Possibly integrate machine code interpretation and virtual memory management
