@@ -8,11 +8,10 @@ let framerate = 0;
 let persistent_frames = 0;
 let active_persistence = 0;
 let framebuff_fd, mouse_fd, ctx, ctx_fd;
-let request_update = true;
 let cursor_canvas = new OffscreenCanvas(16, 16);
 let wallpaper_canvas;
 
-let focused_index = 0;
+let wm_mouse_clicked = false;
 
 let ctl;
 let display = {
@@ -33,10 +32,11 @@ class Win {
         },
         key: ""
     }
+    inactive = false;
+    update = false;
     constructor(title, width, height) {
         this.resize(width, height)
         this.title = title;
-        this.update = false;
         this.x = display.width / 2 - width / 2;
         this.y = display.height / 2 - height /2;
     }
@@ -85,7 +85,22 @@ set_framerate(100);
         ctx.fillText(framerate, 20, 20);
     }
 }
+
+const inactive_window_timeout = 2000;
+function check_unresponsive_windows() {
+    const time = get_time();
+    for(let window of windows) {
+        if(!window.update)
+            window.inactive = time;
+        else
+            window.inactive = false;
+        if(window.inactive !== false && time - window.inactive > inactive_window_timeout)
+            window.close();
+    }
+}
+
 let detect_wm_changes = () => {
+    check_unresponsive_windows();
     let mouse = read(mouse_fd);
     if (mouse.vectorX !== 0 || mouse.vectorY !== 0) {
         active_persistence = persistent_frames;
@@ -158,34 +173,57 @@ async function init_wm(envp) {
 }
 
 function update_wm(force_run, handler) {
-    request_update = detect_wm_changes();
-    if (request_update || force_run) {
+    if (detect_wm_changes() || force_run) {
         draw_background();
         // Render cursor
+        draw_windows();
         if(handler)
             handler();
         render_cursor();
-        request_update = false;
     }
 }
-function get_focused_window() {
-    // TODO
-    return focused_index;
+function get_focused_window(mouse) {
+    let focused_index = windows.length - 1;
+    for(let i = 0; i < windows.length; i++) {
+        let window = windows[i];
+        if(mouse.x >= window.x && mouse.x <= window.x + window.canvas.width
+            && mouse.y >= window.y && mouse.y <= window.y + window.canvas.height
+        ) {
+            focused_index = i;
+        }
+    }
+
+    // Move focused window to the front by splicing it and moving it to the front
+    let window = windows[focused_index];
+    if(window) {
+        windows.splice(focused_index, 1);
+        windows.push(window);
+    }
 }
 function send_events() {
     for(let window of windows) {
         window.events.key = ""; // Clear the key buffer
     }
-
-    let window = windows[focused_index];
     let mouse = read(mouse_fd);
     let key = read(stdin);
 
-    let _mouse = window.events.mouse;
-    _mouse.x = mouse.x - window.x;
-    _mouse.y = mouse.y - window.y;
-    _mouse.down = mouse.down;
-    window.events.key = key;
+    if(!wm_mouse_clicked && mouse.down) {
+        // Change focus when clicked
+        get_focused_window(mouse);
+        wm_mouse_clicked = true;
+    } else if(!mouse.down) {
+        wm_mouse_clicked = false;
+    }
+
+    let window = windows[windows.length - 1];
+
+    if(window) {
+        let _mouse = window.events.mouse;
+        _mouse.x = mouse.x - window.x;
+        _mouse.y = mouse.y - window.y;
+        _mouse.down = mouse.down;
+        window.events.key = key;
+    }
 }
 
 function create_cursor_image(handler) {
