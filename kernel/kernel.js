@@ -151,7 +151,13 @@ let errno;
                 if(c_thread === null || c_process === null || c_user === null) {
                     throw new Error("Cannot run systemcall: invalid context " + `(PROCESS: ${c_process}, THREAD: ${c_thread}, USER: ${c_user})`)
                 }
-                return run_syscall(() => callback(...args));
+                return run_syscall(() => {
+                    // Preserve context across systemcalls to prevent any unwanted context changes
+                    let ctx = save_context();
+                    let r = callback(...args);
+                    restore_context(ctx);
+                    return r;
+                });
             }
         }
         function run_syscall(callback) {
@@ -422,11 +428,28 @@ let errno;
             };
         }
 
+        // Context Management
+        let c_process, c_thread, c_user;
+        function save_context() {
+            return {
+                process: c_process,
+                thread: c_thread,
+                user: c_user
+            }
+        }
+        function restore_context(context) {
+            c_process = context.process;
+            c_thread = context.thread;
+            c_user = context.user;
+        }
+
         // Process
         let processes = [];
         let pids = 1;
         let user_time = 0;
-        let c_process, c_thread, c_user;
+        function is_async(func) {
+            return func[Symbol.toStringTag] === 'AsyncFunction';
+        }
         class Thread {
             constructor(process, exec, pid, args) {
                 this.process = process;
@@ -450,32 +473,57 @@ let errno;
                 return this.is_ready(time);
             }
             run(time) {
-                thread.exec_time = time;
-                (async () => {
-                    // Set system context
-                    c_process = this.process;
-                    c_thread = this;
-                    c_user = this.process.user;
-                    
-                    this.initialized = true;
-
-                    try {                        
-                        await this.exec(...this.args);
-                    } catch (e) {
-                        if (!is_interrupt(e)) {
-                            console.error(this.process.cmdline + " (" + this.process.pid + ") encountered an error (thread: " + this.pid + ")");
-                            console.error(e);
-                            try {
-                                fprintf(stderr, this.process.command + ": " + e.message + "\n");
-                            } catch (e) {
-                                console.warn("No stderr");
-                            }
-                            this.process.kill();
-                        }
-                    }
+                this.exec_time = time;
+                this.initialized = true;
+                this.run_ctx(this.exec, is_async(this.exec), this.process, () => {
                     this.done = true;
                     this.process.check_dead();
-                })()
+                });
+            }
+            run_ctx(_exec, useasync, process, after) {
+                let setctx = () => {
+                    c_process = process;
+                    c_thread = this;
+                    c_user = process.user;
+                }
+                let onerror = e => {
+                    if (!is_interrupt(e)) {
+                        console.error(process.cmdline + " (" + process.pid + ") encountered an error (thread: " + this.pid + ")");
+                        console.error(`Context: PID: ${c_process.pid}, threadID: ${c_thread.pid}, user: ${c_user}`);
+                        console.error(e);
+                        try {
+                            fprintf(stderr, process.command + ": " + e.message + "\n");
+                        } catch (e) {
+                            console.warn("No stderr");
+                        }
+                        process.kill();
+                    }
+                }
+                if(useasync) {
+                    (async () => {
+                        // Set system context
+                        setctx();
+
+                        try {
+                            await _exec(...this.args);
+                        } catch (e) {
+                            onerror(e);
+                            console.warn("ASYNC PROCESS")
+                        }
+                        console.log("After: " + getpid());
+                        after();
+                    })()
+                } else {
+                    setctx();
+
+                    try {
+                        _exec(...this.args);
+                    } catch (e) {
+                        console.log("after")
+                        onerror(e);
+                    }
+                    after();
+                }
             }
         }
         class Process {
@@ -510,7 +558,7 @@ let errno;
                 this.cmdline = path;
                 this.command = get_filename(path);
                 let main = new Thread(this, this.code.main, this.pid, args)
-                this.threads = [main]
+                this.threads = [main];
                 main.run(get_time(3)); // Start the main thread
             }
             clone_descriptors() {
@@ -527,7 +575,6 @@ let errno;
             clone(intermediate_code) {
                 let code = Object.assign(Object.create(Object.getPrototypeOf(this.code)), this.code); // Clone the process running code
                 let p = new Process(code, this.user, this.working_path);
-                this.children.push(p);
                 p.cmdline = this.cmdline;
                 p.command = this.command;
                 p.parent = this;
@@ -536,24 +583,24 @@ let errno;
 
                 // Run intermediate code because javascript is unable to behave exactly like a real kernel
                 if (intermediate_code) {
-                    let process = c_process;
-                    let thread = c_thread;
-                    let user = c_user;
-
-                    c_process = p;
-                    c_thread = p.threads[0];
-                    c_user = p.user;
-                    try {
-                        intermediate_code();
-                    } catch (e) {
-                        this.signal(20);
-                        throw new Error("Could not fork process: " + e)
-                    }
-                    c_process = process;
-                    c_thread = thread;
-                    c_user = user;
+                    let context = save_context();
+                    p.run_main_ctx(intermediate_code, is_async(intermediate_code), () => {
+                        if(!p.dead) {
+                            processes.push(p);
+                            this.children.push(p);
+                        } else {
+                            // Do not signal immediately to allow wait() to set in before it is signaled. This is useful for the shell.
+                            setTimeout(() => {
+                                this.signal(20);
+                            })
+                        }
+                        restore_context(context);
+                    });
                 }
                 return p;
+            }
+            run_main_ctx(_exec, useasync, after) {
+                this.threads[0].run_ctx(_exec, useasync, this, after)
             }
             is_available() {
                 if (this.suspended ||
@@ -631,8 +678,8 @@ let errno;
                         if (c_process.pid === this.pid) interrupt();
                         break;
                 }
-                this.unfreeze();
                 this.waiting = false;
+                this.unfreeze();
             }
             unfreeze() {
                 // Just here to prevent errors. This function is assigned by asyncwait()
@@ -654,10 +701,7 @@ let errno;
                 }
                 // If it has no active threads, it kills itself.
                 this.dead = true;
-                setInterval(check_dead_processes);
-            }
-            wait() {
-                this.waiting = true;
+                check_dead_processes();
             }
             start() {
                 if(this.threads.length > 0) {
@@ -676,22 +720,14 @@ let errno;
                 if (process.pid === pid) return process;
         }
         let asyncwait = function(handler) {
-            let user = c_user;
-            let thread = c_thread;
+            let context = save_context();
             let process = c_process;
-            
-            // Unassign context
-            // c_user = null;
-            // c_thread = null;
-            // c_process = null;
 
             const time = get_time(3);
 
             let post_wait = () => {
                 process.waited += get_time(3) - time;
-                c_user = user;
-                c_thread = thread;
-                c_process = process;
+                restore_context(context);
             }
             if(process.waiting) {
                 let unfreeze = process.unfreeze;
@@ -723,10 +759,6 @@ let errno;
         fork = syscall(function (intermediate_code) {
             if (!c_process) panic("Fork was run outside of kernel context");
             let process = c_process.clone(intermediate_code);
-            if (process)
-                processes.push(process);
-            else
-                return -1;
             return process.pid;
         });
         wait = syscall(async function () {
@@ -741,6 +773,7 @@ let errno;
             let code_object = file.inode.get_data();
             let code = new code_object();
             c_process.exec(code, args ?? [], full_path(path));
+            interrupt();
         });
         thread = syscall(function (exec, args) {
             return c_process.branch_thread(exec, args);
