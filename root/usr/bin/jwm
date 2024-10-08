@@ -8,9 +8,6 @@ this.main = async function (argc, envp) {
     fork(() => {
         exec("/usr/bin/terminal-emulator", argc, envp);
     })
-    // fork(() => {
-    //     exec("/usr/bin/file-manager", argc, envp);
-    // });
 
     thread(send_events_thread);
     while(1) {

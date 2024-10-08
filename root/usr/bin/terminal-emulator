@@ -59,7 +59,10 @@ async function io() {
         let max_chars_width = Math.floor(ctx.canvas.width / char_width);
         let chars = read(outfd);
     
+        if(events.mouse.down)
+            jtk_update();
         if(chars.length > 0) {
+            jtk_update(); // Queue a screen update
             for(let char of chars) {
                 let line = lines[current_line];
                 // Horizontal overflow
@@ -117,8 +120,6 @@ function exec_shell(argc, envp, shell) {
 }
 
 function app_draw(ctx, events) {
-    set_state(ctx, events);
-    backdrop();
 
     // Render text
     for(let i = 0; i < lines.length; i++) {
@@ -126,6 +127,4 @@ function app_draw(ctx, events) {
             text(lines[i], 2, (i + 1) * line_size);
         }
     }
-
-    draw_top_bar();
 }

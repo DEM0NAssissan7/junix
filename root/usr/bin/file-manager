@@ -17,6 +17,7 @@ this.main = async function (argc, envp) {
 
 function switch_path(_p) {
     let t = stat(_p).type;
+    jtk_update();
     switch(t) {
         case "d":
             fclose(fd);
@@ -27,9 +28,6 @@ function switch_path(_p) {
 }
 
 function app_draw(ctx, events) {
-    set_state(ctx, events);
-    backdrop();
-
     text_button(10, 10, 15, 15, () => switch_path(".."), "^");
 
     let names = listdir(fd);
@@ -42,6 +40,4 @@ function app_draw(ctx, events) {
         let name = names[i];
         text_button(x, y, icon_width, icon_height, () => switch_path(name), name);
     }
-
-    draw_top_bar();
 }
