@@ -73,11 +73,17 @@
         fclose(fd);
 
         printf("Running modified executable at " + tmp_exec + "\n");
-        fork(() => {
-            set_variable_value(pid_varname, getpid(), envp);
-            exec(tmp_exec, argc, envp);
+        set_variable_value(pid_varname, getpid(), envp);
+
+        // Create a cleanup to get rid of temporary files
+        fork(async () => {
+            printf("Cleaning modified executible\n");
+            await sleep(100);
             unlink(tmp_exec); // Clean up temporary executable
+            exit();
         });
-        exit();
+
+        // Finally, run the new executable
+        exec(tmp_exec, argc, envp);
     }
 }
