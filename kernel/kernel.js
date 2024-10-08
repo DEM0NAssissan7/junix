@@ -495,7 +495,7 @@ let errno;
                         try {
                             fprintf(stderr, process.command + ": " + e.message + "\n");
                         } catch (e) {
-                            console.warn("No stderr");
+                            kwarn("No stderr");
                         }
                         process.kill();
                     }
@@ -509,9 +509,7 @@ let errno;
                             await _exec(...this.args);
                         } catch (e) {
                             onerror(e);
-                            console.warn("ASYNC PROCESS")
                         }
-                        console.log("After: " + getpid());
                         after();
                     })()
                 } else {
@@ -520,7 +518,6 @@ let errno;
                     try {
                         _exec(...this.args);
                     } catch (e) {
-                        console.log("after")
                         onerror(e);
                     }
                     after();
