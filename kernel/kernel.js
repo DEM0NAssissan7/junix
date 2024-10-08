@@ -60,7 +60,8 @@ var thread; // Create a new thread of a callback inside current process
 var cancel; // Destroy thread (PID)
 var sleep; // Stop running process for x milliseconds
 var exit; // Gracefully kill current process
-var kill; // Kill a process (PID)
+var kill; // Send signal to a process (PID)
+var signal; // Capture signal to calling process
 var getppid; // Get current process parent PID
 var chdir; // Change working directory of current process
 var getcwd; // Get working directory of current process
@@ -527,6 +528,21 @@ let errno;
             }
         }
         class Process {
+            cmdline = null;
+            command = null;
+
+            waiting = false;
+            suspend = false;
+            dead = false;
+
+            sigoverrides = [];
+
+            waited = 0;
+            cputime = 0;
+
+            children = [];
+            child_index = 0;
+            threads = [];
             constructor(code_object, user, working_path) {
                 this.descriptor_table = [];
 
@@ -668,6 +684,10 @@ let errno;
                 return this.add_descriptor(descriptor);
             }
             signal(code) {
+                let override = this.sigoverrides[code];
+                if(override) {
+                    override(code);
+                }
                 switch (code) {
                     case 9:
                         this.kill();
@@ -680,6 +700,9 @@ let errno;
                 }
                 this.waiting = false;
                 this.unfreeze();
+            }
+            capture(signum, handler) {
+                this.sigoverrides[signum] = handler;
             }
             unfreeze() {
                 // Just here to prevent errors. This function is assigned by asyncwait()
@@ -796,6 +819,9 @@ let errno;
             let process = get_process(pid)
             if (!process) throw new Error("No process with PID " + pid);
             process.signal(sig);
+        });
+        signal = syscall(function (signum, handler) {
+            c_process.capture(signum, handler);
         });
         getppid = syscall(function () {
             let parent = c_process.parent;
