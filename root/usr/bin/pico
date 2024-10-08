@@ -28,9 +28,11 @@ this.main = async function(args) {
         }
     }
     fclose(fd);
+    console.log(fd);
     
     draw_screen();
     while(true) {
+        await monitor(stdin);
         let b = read(stdin);
         if(b.length > 0) {
             // Do key things
@@ -65,8 +67,7 @@ this.main = async function(args) {
                     }
             }
             draw_screen();
-        }    
-        await sleep(5);
+        }
     }
 }
 

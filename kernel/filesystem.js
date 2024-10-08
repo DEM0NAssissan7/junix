@@ -1,4 +1,5 @@
 class Inode {
+    monitors = [];
     constructor(index, parent_index, filename, data, type, user, mode) {
         this.index = index;
         this.parent_index = parent_index;
@@ -20,9 +21,17 @@ class Inode {
     umount() {
         this.mountpoint = false;
     }
+    add_monitor(a) {
+        this.monitors.push(a);
+    }
     write(data) {
-        if(this.type === "-")
+        if(this.type === "-") {
             this.data = data;
+        } else
+            throw new Error("Cannot write data to a non-normal file.");
+        for(let monitor of this.monitors)
+            monitor();
+        this.monitors = [];
     }
     append(data) {
         if(this.type === "-") {

@@ -32,6 +32,7 @@ var access; // Check if file exists
 var dup; // Duplicate file descriptor
     close; // Close file descriptor
 var stat; // See the status of a file (its type, user, permissions, etc)
+var monitor; // Pause thread until a file at (fd) has some change
 var unlink; // Delete an inode from the filesystem
 
 /* Directory management */
@@ -54,7 +55,7 @@ var getpid; // Get PID of current process
 var getuid; // Get User ID of calling process
 var getexe; // Get the exec path of the calling process
 var fork; // Duplicate current process
-var wait; // Suspend current process until a signal is recieved or a child finishes
+var wait; // Suspend current process until a signal is recieved
 var exec; // Replace current process code with a program
 var thread; // Create a new thread of a callback inside current process
 var cancel; // Destroy thread (PID)
@@ -182,7 +183,6 @@ let errno;
                 if (inode)
                     this.filetype = inode.type;
                 this.buffer = data;
-                this.events = [];
             }
             update_buffer() {
                 if (this.inode)
@@ -208,6 +208,9 @@ let errno;
             append(data) {
                 this.update_buffer();
                 this.write(this.buffer + data);
+            }
+            monitor(a) {
+                this.inode.add_monitor(a);
             }
             close() {
                 if (this.filesystem) {
@@ -262,8 +265,6 @@ let errno;
             c_process.duplicate(fd);
         });
         close = syscall(function (fd) {
-            let descriptor = c_process.get_descriptor(fd);
-            // descriptor.flush();
             c_process.close(fd);
         });
         stat = syscall(function (path) {
@@ -273,6 +274,15 @@ let errno;
                 user: inode.user,
             }
         });
+        monitor = syscall(async function(fd) {
+            let descriptor = c_process.get_descriptor(fd);
+            let thread = c_thread;
+            thread.waiting_io = true;
+            return asyncwait(a => descriptor.monitor(() => {
+                a();
+                thread.waiting_io = false;
+            }));
+        })
         unlink = syscall(function (path) {
             let f = get_file(path);
             if (f.inode.type !== "-") throw new Error("Cannot unlink a non-normal file.");
@@ -452,26 +462,15 @@ let errno;
             return func[Symbol.toStringTag] === 'AsyncFunction';
         }
         class Thread {
+            waiting_io = false;
+            initialized = false;
+            done = false;
+            last_exec = 0;
             constructor(process, exec, pid, args) {
                 this.process = process;
                 this.exec = exec;
                 this.pid = pid;
                 this.args = args ?? [];
-                this.sleep = 0;
-                this.initialized = false;
-                this.done = false;
-                this.last_exec = 0;
-            }
-            is_ready(time) {
-                if (this.sleep < 0) return false;
-                if (time >= this.last_exec + this.sleep)
-                    return true;
-                return false;
-            }
-            slept(time) {
-                if (this.sleep === 0)
-                    return false;
-                return this.is_ready(time);
             }
             run(time) {
                 this.exec_time = time;
@@ -497,7 +496,7 @@ let errno;
                         } catch (e) {
                             kwarn("No stderr");
                         }
-                        process.kill();
+                        setTimeout(() => process.kill());
                     }
                 }
                 if(useasync) {
@@ -525,6 +524,8 @@ let errno;
             }
         }
         class Process {
+            descriptor_table = [];
+
             cmdline = null;
             command = null;
 
@@ -540,30 +541,16 @@ let errno;
             children = [];
             child_index = 0;
             threads = [];
+            exec_time = 0;
             constructor(code_object, user, working_path) {
-                this.descriptor_table = [];
-
-                this.cmdline = null;
-                this.command = null;
-                this.waiting = false;
-                this.suspended = false;
-                this.dead = false;
-
                 this.working_path = working_path;
                 this.time_created = get_time(3);
-                this.waited = 0;
-                this.cputime = 0;
 
                 this.pid = pids;
                 this.user = user;
                 this.code = code_object; // Pass in code object, must already be created from 'new' statment beforehand
-                this.children = [];
-                this.child_index = 0;
                 this.parent = this;
-                this.threads = [];
                 this.add_thread(this.code.main, []);
-
-                this.exec_time = 0;
             }
             exec(code, args, path) {
                 if(!code.main) throw new Error("Exec: specified code does not have a .main method");
@@ -591,7 +578,7 @@ let errno;
                 p.cmdline = this.cmdline;
                 p.command = this.command;
                 p.parent = this;
-                p.child_index = this.children.length - 1;
+                p.child_index = this.children.length;
                 p.descriptor_table = this.clone_descriptors();
 
                 // Run intermediate code because javascript is unable to behave exactly like a real kernel
@@ -614,13 +601,6 @@ let errno;
             }
             run_main_ctx(_exec, useasync, after) {
                 this.threads[0].run_ctx(_exec, useasync, this, after)
-            }
-            is_available() {
-                if (this.suspended ||
-                    this.dead ||
-                    this.waiting)
-                    return false;
-                return true;
             }
             branch_thread(exec, args) {
                 let thread = new Thread(this, exec, pids, args);
@@ -747,6 +727,7 @@ let errno;
 
             let post_wait = () => {
                 process.waited += get_time(3) - time;
+                process.unfreeze = () => {};
                 restore_context(context);
             }
             if(process.waiting) {
@@ -760,7 +741,7 @@ let errno;
             }
             // If the process is dead, we make the promise unresolvable to prevent further execution.
             if(process.dead) {
-                return new Promise(a => {});
+                return new Promise();
             }
 
             return new Promise(resolve => {
@@ -782,10 +763,8 @@ let errno;
             return process.pid;
         });
         wait = syscall(async function () {
-            if (!c_process) panic("wait() was run outside of kernel context");
             c_process.waiting = true;
-            if (c_process.children.length !== 0)
-                return asyncwait();
+            return asyncwait();
         });
         exec = syscall(function (path, ...args) {
             let file = get_file(path);

@@ -54,8 +54,10 @@ function reset_buffer() {
     }
 }
 
-async function io() {
+async function out_thread() {
     while(true) {
+        await monitor(outfd);
+
         let max_chars_width = Math.floor(ctx.canvas.width / char_width);
         let chars = read(outfd);
     
@@ -99,10 +101,11 @@ async function io() {
             }
             write(outfd, "");
         }
-    
-        write(infd, events.key);
-        await sleep(1);
     }
+}
+
+async function in_thread() {
+    write(infd, events.key)
 }
 
 function exec_shell(argc, envp, shell) {

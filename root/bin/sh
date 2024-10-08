@@ -29,11 +29,11 @@ this.main = async function(args, envp) {
 
 async function readinput() {
     while(true) {
-        let b = read(0);
+        await monitor(stdin)
+        let b = read(stdin);
         if(b.length > 0) {
             add_to_buffer(b);
         }
-        await sleep(1);
     }
 }
 

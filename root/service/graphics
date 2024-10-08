@@ -10,16 +10,10 @@ this.main = async function() {
     init_framebuffer();
     init_window();
 
+    thread(check_mode);
     while(true) {
-        check_mode();
-        switch(mode) {
-            case "console":
-                update_console();
-                break;
-            case "framebuffer":
-                break;
-            default:
-                throw new Error("Mode is invalid");
+        if(mode === "console") {
+            update_console();
         }
         await sleep(30);
     }
@@ -64,25 +58,29 @@ function init_framebuffer() {
     write(fd, ctx);
     printf("Initialized framebuffer\n");
 }
-function check_mode () {
-    let input = read(framebuff_fd);
-    if(typeof input === "object") {
-        if(input.modeset === true) { // If the intention is to set the mode
-            canvas.width = input.width;
-            canvas.height = input.height;
-            mode = "framebuffer";
-            console.log("switched to framebuffer");
-            canvas.style = "display: block";
-            console_element.style = "display: none";
-            canvas.style.cursor = 'none';
-        } else if(input.modeset === false) {
-            mode = "console";
-            console.log("switched to console");
-            canvas.style = "display: none";
-            console_element.style = "display: block";
-            canvas.style.cursor = 'auto';
+async function check_mode () {
+    let input;
+    while(true) {
+        await monitor(framebuff_fd);
+        input = read(framebuff_fd);
+        if(typeof input === "object") {
+            if(input.modeset === true) { // If the intention is to set the mode
+                canvas.width = input.width;
+                canvas.height = input.height;
+                mode = "framebuffer";
+                console.log("switched to framebuffer");
+                canvas.style = "display: block";
+                console_element.style = "display: none";
+                canvas.style.cursor = 'none';
+            } else if(input.modeset === false) {
+                mode = "console";
+                console.log("switched to console");
+                canvas.style = "display: none";
+                console_element.style = "display: block";
+                canvas.style.cursor = 'auto';
+            }
+            write(framebuff_fd, undefined);
         }
-        write(framebuff_fd, undefined);
     }
 }
 

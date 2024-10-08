@@ -1,5 +1,6 @@
 let fd;
 let keys = "";
+let pid = 0;
 
 function keyupdate() {
     write(fd, keys);
@@ -9,9 +10,10 @@ this.main = async function() {
     fd = fopen("/dev/keyboard", "w", 777);
     printf("Created keyboard driver\n");
 
+    pid = getpid();
     while(true) {
+        await wait();
         keyupdate();
-        await sleep(1);
     }
 }
 
@@ -40,8 +42,10 @@ function replace_keys(key) {
 document.addEventListener("keydown", (e) => {
     keys = replace_keys(e.key);
     e.preventDefault();
+    kill(pid, 20);
 });
 
 document.addEventListener("keyup", (e) => {
     keys = keys.replaceAll(replace_keys(e.key), "");
+    kill(pid, 20);
 });
