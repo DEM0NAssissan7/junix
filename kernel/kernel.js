@@ -6,10 +6,11 @@ Main objectives:
 - Behave as close as possible to a real UNIX-like OS (e.g. syscall names and behaviors)
 
 Features:
-- Passive Scheduler (the kernel doesn't actively run any processes)
+- Passive Scheduler (the kernel doesn't actively run any tasks in its own context)
 - Microkernel: The userspace programs take care of the drivers
 
 TODO:
+- Task Scheduler (replace Process[Thread] implementation)
 - UNIX Domain Sockets
 - FIFO
 */
@@ -22,6 +23,9 @@ In order for programs to properly be able to call systemcalls, the variable scop
 
 Syscall sections:
 */
+
+//DEBUG: REMOVE
+var tasks = [];
 
 /* File management */
 
@@ -57,7 +61,7 @@ var fork; // Duplicate current process
 var wait; // Suspend current process until a signal is recieved or a child finishes
 var exec; // Replace current process code with a program
 var thread; // Create a new thread of a callback inside current process
-var cancel; // Destroy thread (PID)
+var cancel; // Stop a running thread (preserves siblings)
 var sleep; // Stop running process for x milliseconds
 var exit; // Gracefully kill current process
 var kill; // Send signal to a process (PID)
@@ -135,7 +139,7 @@ let errno;
             stop_kernel();
             sync(); // Make sure disks are synced before presenting error so the user doesn't lose data
             alert("Panic! -> " + message);
-            console.error("Kernel panic (" + get_time() + ")");
+            console.error("Kernel panic (" + get_uptime() + ")");
             console.error(message);
             kerror("Kernel panic: " + message);
             throw new Error("Panic!");
@@ -149,14 +153,14 @@ let errno;
         let system_time = 0;
         function syscall(callback) {
             return function (...args) {
-                if(c_thread === null || c_process === null || c_user === null) {
-                    throw new Error("Cannot run systemcall: invalid context " + `(PROCESS: ${c_process}, THREAD: ${c_thread}, USER: ${c_user})`)
+                if(c_task === null) {
+                    throw new Error("Cannot run systemcall: invalid context " + `(TASK: ${c_task})`)
                 }
                 return run_syscall(() => {
                     // Preserve context across systemcalls to prevent any unwanted context changes
-                    let ctx = save_context();
+                    let ctx = c_task;
                     let r = callback(...args);
-                    restore_context(ctx);
+                    c_task = ctx;
                     return r;
                 });
             }
@@ -233,17 +237,17 @@ let errno;
             if (file.incomplete) {
                 if (flags === "r" || file.noparent) throw new Error("File " + path + " does not exist");
                 kdebug("Creating file at " + path);
-                inode = file.filesystem.create_file(inode.index, get_filename(path), "", "-", c_user, mode ?? inode.mode);
+                inode = file.filesystem.create_file(inode.index, get_filename(path), "", "-", c_task.user, mode ?? inode.mode);
             }
 
-            let descriptor = new FileDescriptor(inode.get_data(), flags, inode.mode, c_user, inode, file.filesystem);
-            return c_process.create_descriptor(descriptor);
+            let descriptor = new FileDescriptor(inode.get_data(), flags, inode.mode, c_task.user, inode, file.filesystem);
+            return c_task.create_descriptor(descriptor);
         });
         read = syscall(function (fd) {
-            return c_process.get_descriptor(fd).read();
+            return c_task.get_descriptor(fd).read();
         });
         write = syscall(function (fd, data) {
-            let descriptor = c_process.get_descriptor(fd);
+            let descriptor = c_task.get_descriptor(fd);
             switch (descriptor.flags) {
                 case 'r':
                     throw new Error("Cannot write to a file descriptor opened as readonly");
@@ -259,12 +263,12 @@ let errno;
             return !(get_file(path).incomplete);
         });
         dup = syscall(function (fd) {
-            c_process.duplicate(fd);
+            c_task.duplicate(fd);
         });
         close = syscall(function (fd) {
-            let descriptor = c_process.get_descriptor(fd);
+            let descriptor = c_task.get_descriptor(fd);
             // descriptor.flush();
-            c_process.close(fd);
+            c_task.close(fd);
         });
         stat = syscall(function (path) {
             let inode = get_file(path).inode;
@@ -281,21 +285,21 @@ let errno;
         mkdir = syscall(function (path) {
             let file = get_file(path);
             if (file.incomplete)
-                file.filesystem.create_file(file.inode.index, get_filename(path), [], "d", c_user, file.inode.mode);
+                file.filesystem.create_file(file.inode.index, get_filename(path), [], "d", c_task.user, file.inode.mode);
         });
         opendir = syscall(function (path) {
             let file = get_file(path);
             if (file.incomplete) throw new Error("Directory " + path + " does not exist");
             if (file.inode.type !== "d") throw new Error("opendir() failed: not a directory [" + path + "]");
-            let descriptor = new FileDescriptor(file.inode.get_data(), "r", 755, c_user, file.inode, file.filesystem);
-            return c_process.create_descriptor(descriptor);
+            let descriptor = new FileDescriptor(file.inode.get_data(), "r", 755, c_task.user, file.inode, file.filesystem);
+            return c_task.create_descriptor(descriptor);
         });
         listdir = syscall(function (fd) {
-            return c_process.get_descriptor(fd).listdir();
+            return c_task.get_descriptor(fd).listdir();
         });
         closedir = syscall(function (fd) {
-            let descriptor = c_process.get_descriptor(fd);
-            c_process.close(descriptor);
+            let descriptor = c_task.get_descriptor(fd);
+            c_task.close(descriptor);
         });
         dirname = syscall(function (path) {
             return full_path(path);
@@ -372,9 +376,9 @@ let errno;
         // Kernel file tools
         let full_path_dirty = function (path) {
             let working_path = "";
-            if (c_process) {
+            if (c_task) {
                 if (path[0] !== "/")
-                    working_path = c_process.working_path;
+                    working_path = c_task.working_path;
             }
             return working_path + "/" + path;
         }
@@ -430,149 +434,53 @@ let errno;
         }
 
         // Context Management
-        let c_process, c_thread, c_user;
-        function save_context() {
-            return {
-                process: c_process,
-                thread: c_thread,
-                user: c_user
-            }
-        }
-        function restore_context(context) {
-            c_process = context.process;
-            c_thread = context.thread;
-            c_user = context.user;
-        }
+        let c_task = null;
 
-        // Process
-        let processes = [];
+        // Task
+        // let tasks = [];
         let pids = 1;
         let user_time = 0;
         function is_async(func) {
             return func[Symbol.toStringTag] === 'AsyncFunction';
         }
-        class Thread {
-            constructor(process, exec, pid, args) {
-                this.process = process;
-                this.exec = exec;
-                this.pid = pid;
-                this.args = args ?? [];
-                this.sleep = 0;
-                this.initialized = false;
-                this.done = false;
-                this.last_exec = 0;
-            }
-            is_ready(time) {
-                if (this.sleep < 0) return false;
-                if (time >= this.last_exec + this.sleep)
-                    return true;
-                return false;
-            }
-            slept(time) {
-                if (this.sleep === 0)
-                    return false;
-                return this.is_ready(time);
-            }
-            run(time) {
-                this.exec_time = time;
-                this.initialized = true;
-                this.run_ctx(this.exec, is_async(this.exec), this.process, () => {
-                    this.done = true;
-                    this.process.check_dead();
-                });
-            }
-            run_ctx(_exec, useasync, process, after) {
-                let setctx = () => {
-                    c_process = process;
-                    c_thread = this;
-                    c_user = process.user;
-                }
-                let onerror = e => {
-                    if (!is_interrupt(e)) {
-                        console.error(process.cmdline + " (" + process.pid + ") encountered an error (thread: " + this.pid + ")");
-                        console.error(`Context: PID: ${c_process.pid}, threadID: ${c_thread.pid}, user: ${c_user}`);
-                        console.error(e);
-                        try {
-                            fprintf(stderr, process.command + ": " + e.message + "\n");
-                        } catch (e) {
-                            kwarn("No stderr");
-                        }
-                        process.kill();
-                    }
-                }
-                if(useasync) {
-                    (async () => {
-                        // Set system context
-                        setctx();
-
-                        try {
-                            await _exec(...this.args);
-                        } catch (e) {
-                            onerror(e);
-                        }
-                        after();
-                    })()
-                } else {
-                    setctx();
-
-                    try {
-                        _exec(...this.args);
-                    } catch (e) {
-                        onerror(e);
-                    }
-                    after();
-                }
-            }
-        }
-        class Process {
+        class Task {
             cmdline = null;
             command = null;
 
+            descriptor_table = [];
+
             waiting = false;
-            suspend = false;
+            suspended = false;
             dead = false;
 
             sigoverrides = [];
 
+            last_exec = 0;
             waited = 0;
             cputime = 0;
+            exec_time = 0;
 
+            initialized = false;
+
+            siblings = [this];
+            is_main = true;
             children = [];
-            child_index = 0;
-            threads = [];
-            constructor(code_object, user, working_path) {
-                this.descriptor_table = [];
 
-                this.cmdline = null;
-                this.command = null;
-                this.waiting = false;
-                this.suspended = false;
-                this.dead = false;
+            constructor(user, working_path, path, code, handler, pid, args) {
+                this.cmdline = path;
+                this.command = get_filename(path);
 
                 this.working_path = working_path;
                 this.time_created = get_time(3);
-                this.waited = 0;
-                this.cputime = 0;
 
                 this.pid = pids;
                 this.user = user;
-                this.code = code_object; // Pass in code object, must already be created from 'new' statment beforehand
-                this.children = [];
-                this.child_index = 0;
+                this.code = code; // Pass in code object, must already be created from 'new' statment beforehand
                 this.parent = this;
-                this.threads = [];
-                this.add_thread(this.code.main, []);
 
-                this.exec_time = 0;
-            }
-            exec(code, args, path) {
-                if(!code.main) throw new Error("Exec: specified code does not have a .main method");
-                this.code = code; // Replace process code object with exec
-                this.cmdline = path;
-                this.command = get_filename(path);
-                let main = new Thread(this, this.code.main, this.pid, args)
-                this.threads = [main];
-                main.run(get_time(3)); // Start the main thread
+                this.handler = handler;
+                this.pid = pid;
+                this.args = args ?? [];
             }
             clone_descriptors() {
                 let retval = [];
@@ -586,69 +494,32 @@ let errno;
                 return retval;
             }
             clone(intermediate_code) {
-                let code = Object.assign(Object.create(Object.getPrototypeOf(this.code)), this.code); // Clone the process running code
-                let p = new Process(code, this.user, this.working_path);
-                p.cmdline = this.cmdline;
-                p.command = this.command;
-                p.parent = this;
-                p.child_index = this.children.length - 1;
-                p.descriptor_table = this.clone_descriptors();
+                let code = Object.assign(Object.create(Object.getPrototypeOf(this.code)), this.code); // Clone the task running code
+                if(!code.main) throw new Error("Exec: specified code does not have a .main method");
+                let t = new Task(this.user, this.working_path, this.cmdline, code, code.main, pids++, this.args);
+                t.cmdline = this.cmdline;
+                t.command = this.command;
+                t.parent = this;
+                t.parent_pid = this.pid;
+                t.descriptor_table = this.clone_descriptors();
 
                 // Run intermediate code because javascript is unable to behave exactly like a real kernel
                 if (intermediate_code) {
-                    let context = save_context();
-                    p.run_main_ctx(intermediate_code, is_async(intermediate_code), () => {
-                        if(!p.dead) {
-                            processes.push(p);
-                            this.children.push(p);
+                    let context = c_task;
+                    t.run_ctx(intermediate_code, is_async(intermediate_code), () => {
+                        if(!t.dead) {
+                            tasks.push(t);
+                            this.children.push(t);
                         } else {
                             // Do not signal immediately to allow wait() to set in before it is signaled. This is useful for the shell.
                             setTimeout(() => {
                                 this.signal(20);
                             })
                         }
-                        restore_context(context);
+                        c_task = context;
                     });
                 }
-                return p;
-            }
-            run_main_ctx(_exec, useasync, after) {
-                this.threads[0].run_ctx(_exec, useasync, this, after)
-            }
-            is_available() {
-                if (this.suspended ||
-                    this.dead ||
-                    this.waiting)
-                    return false;
-                return true;
-            }
-            branch_thread(exec, args) {
-                let thread = new Thread(this, exec, pids, args);
-                this.threads.push(thread);
-                thread.run(); // Start the thread after creation
-            }
-            add_thread(exec, args) {
-                this.threads.push(new Thread(this, exec, pids, args));
-                return pids++;
-            }
-            get_thread(pid) {
-                for (let thread of this.threads) {
-                    if (thread.pid === pid)
-                        return thread;
-                }
-                return null;
-            }
-            cancel_thread(pid) {
-                let thread = null;
-                let i = 0;
-                for (; i < this.threads.length; i++) {
-                    if (this.threads[i].pid === pid) {
-                        thread = this.threads[i];
-                        break;
-                    }
-                }
-                if (thread === null) throw new Error("Thread " + pid + " does not exist on this process");
-                this.threads.splice(i, 1);
+                return t;
             }
             add_descriptor(descriptor) {
                 for (let i = 0; i <= this.descriptor_table.length; i++) {
@@ -680,19 +551,19 @@ let errno;
                     descriptor.filesystem.fds++;
                 return this.add_descriptor(descriptor);
             }
-            signal(code) {
-                let override = this.sigoverrides[code];
+            signal(signum) {
+                let override = this.sigoverrides[signum];
                 if(override) {
-                    override(code);
+                    override(signum);
                 }
-                switch (code) {
+                switch (signum) {
                     case 9:
                         this.kill();
-                        if (c_process.pid === this.pid) interrupt();
+                        if (c_task.pid === this.pid) interrupt();
                         break;
                     case 15:
                         this.kill();
-                        if (c_process.pid === this.pid) interrupt();
+                        if (c_task.pid === this.pid) interrupt();
                         break;
                 }
                 this.waiting = false;
@@ -710,56 +581,116 @@ let errno;
                     if (!descriptor) continue;
                     this.close(i);
                 }
-                this.dead = true;
-                check_dead_processes();
-            }
-            check_dead() {
-                for(let thread of this.threads) {
-                    // Check if the process has no active threads
-                    if(!thread.done)
-                        return;
-                }
-                // If it has no active threads, it kills itself.
-                this.dead = true;
-                check_dead_processes();
-            }
-            start() {
-                if(this.threads.length > 0) {
-                    this.threads[0].run(); // Execute main thread
-                } else {
-                    throw new Error("Cannot start process: no threads");
-                }
+                // Kill siblings
+                for(let t of this.siblings)
+                    if(!t.dead)
+                        t.dead = true;
+                check_dead_tasks();
             }
             get_cpu_time(){
                 const time = get_time(3);
                 return time - this.time_created - this.waited
             }
+            run(time) {
+                this.exec_time = time;
+                this.initialized = true;
+                this.run_ctx(this.handler, is_async(this.handler), () => {
+                    if(!this.initialized) // Prevent killing on finished execution if the process has been reinitialized with a new executable
+                        this.die();
+                });
+            }
+            run_ctx(_exec, useasync, after) {
+                let onerror = e => {
+                    if (!is_interrupt(e)) {
+                        console.error(`[${get_uptime()}]: ` + this.cmdline + " (" + this.pid + ") encountered an error");
+                        console.error(`Context: PID: ${c_task.pid}, user: ${c_task.user}`);
+                        console.error(e);
+                        try {
+                            fprintf(stderr, this.command + ": " + e.message + "\n");
+                        } catch (e) {
+                            kwarn("No stderr");
+                        }
+                        this.kill();
+                    }
+                }
+                if(useasync) {
+                    (async () => {
+                        // Set system context
+                        c_task = this;
+
+                        try {
+                            await _exec(...this.args);
+                        } catch (e) {
+                            onerror(e);
+                        }
+                        after();
+                    })()
+                } else {
+                    c_task = this;
+
+                    try {
+                        _exec(...this.args);
+                    } catch (e) {
+                        onerror(e);
+                    }
+                    after();
+                }
+            }
+            // A sibling is basically just another word for thread
+            // Siblings share descriptors and sigoverrides and children (and code).
+            create_sibling(handler, args) {
+                let t = new Task(this.user, this.working_path, this.cmdline, this.code, handler, pids++, args);
+                t.descriptor_table = this.descriptor_table;
+                t.children = this.children;
+                t.sigoverrides = this.sigoverrides;
+                t.parent_pid = this.parent_pid;
+                t.is_main = false;
+
+                t.siblings = this.siblings;
+                t.siblings.push(this);
+                
+                tasks.push(t);
+                t.run(get_time(3));
+                return t;
+            }
+            // If we want to kill one process, we want to kill all siblings too becuase they are undesired
+            die() {
+                if(this.is_main)
+                    this.kill();
+                else {
+                    this.dead = true;
+                    check_dead_tasks();
+                }
+            }
         }
-        let get_process = function (pid) {
-            for (let process of processes)
-                if (process.pid === pid) return process;
+        let get_task = function (pid) {
+            for (let task of tasks)
+                if (task.pid === pid) return task;
+        }
+        let get_task_index = function (pid) {
+            for(let i = 0; i < tasks.length; i++)
+                if(tasks[i].pid === pid) return i;
         }
         let asyncwait = function(handler) {
-            let context = save_context();
-            let process = c_process;
+            let task = c_task;
 
             const time = get_time(3);
 
             let post_wait = () => {
-                process.waited += get_time(3) - time;
-                restore_context(context);
+                task.waited += get_time(3) - time;
+                c_task = task;
             }
-            if(process.waiting) {
-                let unfreeze = process.unfreeze;
+            if(task.waiting) {
+                let unfreeze = task.unfreeze;
                 return new Promise(a => {
-                    process.unfreeze = () => {
-                        unfreeze();
+                    task.unfreeze = () => {
+                        // unfreeze();
                         a();
                     }
                 }).then(post_wait);
             }
-            // If the process is dead, we make the promise unresolvable to prevent further execution.
-            if(process.dead) {
+            // If the task is dead, we make the promise unresolvable to prevent further execution.
+            if(task.dead) {
                 return new Promise(a => {});
             }
 
@@ -768,60 +699,67 @@ let errno;
             }).then(post_wait);
         }
         getpid = syscall(function () {
-            return c_process.pid;
+            return c_task.pid;
         });
         getuid = syscall(function () {
-            return c_process.user;
+            return c_task.user;
         });
         getexe = syscall(function () {
-            return c_process.cmdline;
+            return c_task.cmdline;
         })
         fork = syscall(function (intermediate_code) {
-            if (!c_process) panic("Fork was run outside of kernel context");
-            let process = c_process.clone(intermediate_code);
-            return process.pid;
+            if (!c_task) panic("Fork was run outside of kernel context");
+            let t = c_task.clone(intermediate_code);
+            return t.pid;
         });
         wait = syscall(async function () {
-            if (!c_process) panic("wait() was run outside of kernel context");
-            c_process.waiting = true;
-            if (c_process.children.length !== 0)
-                return asyncwait();
+            if (!c_task) panic("wait() was run outside of kernel context");
+            c_task.waiting = true;
+            return asyncwait();
         });
         exec = syscall(function (path, ...args) {
             let file = get_file(path);
             if (file.incomplete) throw new Error("File at " + path + " does not exist.");
             let code_object = file.inode.get_data();
             let code = new code_object();
-            c_process.exec(code, args ?? [], full_path(path));
+
+            c_task.code = code;
+            c_task.cmdline = path;
+            c_task.command = get_filename(path);
+            c_task.handler = code.main;
+            c_task.args = args;
+
+            c_task.initialized = false;
+            c_task.run(get_time(3));
             interrupt();
         });
-        thread = syscall(function (exec, args) {
-            return c_process.branch_thread(exec, args);
+        thread = syscall(function (handler, args) {
+            return c_task.create_sibling(handler, args);
         });
         cancel = syscall(function (pid) {
-            c_process.cancel_thread(pid);
+            get_task(pid).die();
         });
         sleep = syscall(async function (time) {
-            let process = c_process;
+            let task = c_task;
             return asyncwait(a => setTimeout(() => {
-                if(!process.dead)
+                if(!task.dead)
                     a();
             }, time))
         });
         exit = syscall(function () {
-            c_process.kill();
+            c_task.kill();
             interrupt();
         });
         kill = syscall(function (pid, sig) {
-            let process = get_process(pid)
-            if (!process) throw new Error("No process with PID " + pid);
-            process.signal(sig);
+            let task = get_task(pid)
+            if (!task) throw new Error("No process with PID " + pid);
+            task.signal(sig);
         });
         signal = syscall(function (signum, handler) {
-            c_process.capture(signum, handler);
+            c_task.capture(signum, handler);
         });
         getppid = syscall(function () {
-            let parent = c_process.parent;
+            let parent = c_task.parent;
             if (!parent) throw new Error("Process does not have a parent.")
             return parent.pid;
         });
@@ -829,19 +767,23 @@ let errno;
             let new_working_path = full_path(path);
             if (!access(new_working_path))
                 throw new Error(new_working_path + " does not exist.");
-            return c_process.working_path = new_working_path;
+            return c_task.working_path = new_working_path;
         });
         getcwd = syscall(function () {
-            return c_process.working_path;
+            return c_task.working_path;
         });
 
-        // Passive Process Management
-        function check_dead_processes() {
-            for (let i = 0; i < processes.length; i++) {
-                let process = processes[i];
-                if (process.dead) {
-                    processes.splice(i, 1);
-                    process.parent.signal(20);
+        // Passive Task Management
+        function check_dead_tasks() {
+            for (let i = 0; i < tasks.length; i++) {
+                let task = tasks[i];
+                if (task.dead) {
+                    for(let j = 0; j < task.siblings.length; j++)
+                        if(task.siblings[j].pid === task.pid)
+                            task.siblings.splice(j, 1);
+                    tasks.splice(i, 1);
+                    if(task.siblings.length === 0) // If all siblings (threads) are dead
+                        task.parent.signal(20);
                     i--;
                     continue;
                 }
@@ -883,6 +825,9 @@ let errno;
         create_init_rootfs();
 
         /* Kernel-level device management */
+        // Because this project sucks, in order to do literally any sort of FS operation, a dummy task has to be created.
+        c_task = new Task(0, "/", "kernel", null ,() => {this.main=() => wait();}, 0, []);
+
         let devfs;
         let device_pointers = [];
         let device_inodes = [];
@@ -1006,10 +951,10 @@ let errno;
                     exec("/bin/init");
                 }
             }
-            processes.push(new Process(init_code, 0, "/"));
+            tasks.push(new Task(0, "/", "preinit", init_code, init_code.main, pids++, []));
         }
         function run_init() {
-            processes[0].start();
+            tasks[0].run();
         }
         create_init();
         run_init();
@@ -1035,12 +980,12 @@ let errno;
         // System management
         let loop_timeout = 10;
         let reset = function () {
-            for(let p of processes)
-                p.kill(); // Kill all processes
+            for(let t of tasks)
+                t.kill(); // Kill all tasks
             purge();
         }
         function purge() {
-            processes = [];
+            tasks = [];
             pids = 1;
         }
         function dirty_purge() {
@@ -1106,7 +1051,7 @@ let errno;
                         rebooting = false;
                         break;
                     case 8:
-                        // Kernel stasis: keep kernel alive with no processes (including no init)
+                        // Kernel stasis: keep kernel alive with no tasks (including no init)
                         kdebug("Entering kernel stasis...");
                         reset();
                         unmount_all();
@@ -1135,7 +1080,7 @@ let errno;
                 user_time: get_user_time(),
                 system_time: system_time,
                 uptime: round(get_uptime()/1000),
-                procs: processes.length,
+                tasks: tasks.length,
 
             }
         })
@@ -1144,8 +1089,8 @@ let errno;
         function get_user_time() {
             let t = 0;
             const time = get_time(3);
-            for(let process of processes) {
-                t += time - process.time_created - process.waited;
+            for(let task of tasks) {
+                t += time - task.time_created - task.waited;
             }
             return t;
         }

@@ -1,7 +1,9 @@
 // JUNIX Init system: inspired by FreeBSD rc
+
 let fd, loginconf;
 let started = false;
 this.main = async function() {
+    console.log("Initializing JUNIX...");
     if(getpid() !== 1) {
         fprintf(stderr, "init can only run on PID 1\n");
         exit();
@@ -28,8 +30,7 @@ this.main = async function() {
         close(stdin);
         close(stdout);
         close(stderr);
-        await sleep(100);
-    
+        // await sleep(10);
         post_driver();
         started = true;
     } else {
@@ -59,6 +60,7 @@ function post_driver() {
     let c;
     for(let command of paths) {
         c = parse_command(command);
+        console.log("Starting " + c.cmd);
         start(c.cmd, c.args);
     }
     printf("\n\n");

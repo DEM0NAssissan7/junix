@@ -1,10 +1,10 @@
 // Jtar: a terrible clone of UNIX tar library
 
 // Archiving: meat and potatoes
-const modifier_key = "##TAR" + "MOD##:" // This is split to allow the program to also itself be compressed by tar
-const file_marker = "f";
-const dir_marker = "d";
-const name_marker = "n";
+const modifier_key = "#" + "TAR" + "#:" // This is split to allow the program to also itself be compressed by tar
+const file_marker = "File:";
+const dir_marker = "Dir-";
+const name_marker = "Name-";
 function stringify(path) {
     let output = "";
 

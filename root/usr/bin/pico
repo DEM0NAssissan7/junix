@@ -37,6 +37,7 @@ this.main = async function(args) {
             switch(b) {
                 case "Escape":
                     write_changes();
+                    exit();
                     return 0;
                 case "\x03": // Left
                     move_cursor(-1)
@@ -66,7 +67,7 @@ this.main = async function(args) {
             }
             draw_screen();
         }    
-        await sleep(5);
+        await sleep(2);
     }
 }
 
