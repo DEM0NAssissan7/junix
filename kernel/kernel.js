@@ -951,7 +951,7 @@ let errno;
                     exec("/bin/init");
                 }
             }
-            tasks.push(new Task(0, "/", "preinit", init_code, init_code.main, 1, []));
+            tasks.push(new Task(0, "/", "preinit", init_code, init_code.main, pids++, []));
         }
         function run_init() {
             tasks[0].run();
