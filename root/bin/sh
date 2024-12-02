@@ -8,6 +8,7 @@ let env;
 let executed = false;
 const version_string = "sh 1.2";
 let condition_met = true;
+let waiting = false;
 this.main = async function(args, envp) {
     env = envp;
 
@@ -29,6 +30,10 @@ this.main = async function(args, envp) {
 
 async function readinput() {
     while(true) {
+        if(waiting) {
+            await sleep(10);
+            continue;
+        }
         let b = read(0);
         if(b.length > 0) {
             add_to_buffer(b);
@@ -333,12 +338,14 @@ async function execute_command(command, args) {
             fork(() => {
                 exec(cmdline, args, env);
             });
+            waiting = true;
             await wait();
         } catch (e) {
             if(!is_interrupt(e))
                 fprintf(stderr, "sh: " + e + "\n");
             return 1;
         }
+        waiting = false;
     }
     return true;
 }

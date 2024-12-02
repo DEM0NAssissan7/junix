@@ -1,5 +1,5 @@
 {
-    const use_localstorage_driver = true;
+    const use_localstorage_driver = false;
     const use_initfs_only = !use_localstorage_driver;
     const root = '/dev/disk0';
     
