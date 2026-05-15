@@ -4,15 +4,18 @@ import os
 from os import listdir
 
 osroot="root"
+osboot="boot"
 output_file="osimage.js"
 
 if os.path.isfile(output_file):
     os.remove(output_file) # Remove old os image
 
+# Open up new os image
+out=open(output_file, "a")
+
 def add_file(path):
-    f=open(path, "r")
-    w=open(output_file, "a")
-    w.write("/* "+path+" */\n" + f.read() + "\n")
+    s=open(path, "r")
+    out.write("/* "+path+" */\n" + s.read() + "\n")
 
 # Add necessary static files
 add_file("libraries/mawi.js")
@@ -29,7 +32,22 @@ def listdir_skip_hidden(path):
            files.remove(file)
     return files
 
-def builddir(path, ref, level):
+STRING_TYPE = 0
+FUNCTION_TYPE = 1
+
+def write_file(source, js_path, write_command):
+    s=open(source, "r")
+    if s.read(1) == "!": # string type
+        if(s.read(1) != "\n"):
+            s.seek(1)
+        out.write(write_command + "('"+js_path+"',`"+s.read()+"`);\n")
+    else:
+        s.seek(0)
+        out.write(write_command + "('"+js_path+"',function(){\n"+s.read()+"\n});\n")
+    # Close up file
+    s.close()
+
+def builddir(path, ref, level, write_command):
     files=listdir_skip_hidden(path)
 
     prefix=""
@@ -37,35 +55,25 @@ def builddir(path, ref, level):
         prefix+="—"
 
     for file in files:
-        printref=ref + "/" + file # What javascript sees
-        pathref=path + "/" + file # Actual file path in relation to .
-        if os.path.isfile(pathref) == True:
+        js_path=ref + "/" + file # What javascript sees
+        source=path + "/" + file # Actual file path in relation to .
+        if os.path.isfile(source) == True:
             print(prefix + " " + file)
-            f=open(pathref, "r")
-            w=open(output_file, "a")
-            if f.read(1) == "!":
-                if(f.read(1) != "\n"):
-                    f.seek(1)
-                w.write("mkfile('"+printref+"',`"+f.read()+"`);\n")
-            else:
-                f.seek(0)
-                w.write("mkfile('"+printref+"',function(){\n"+f.read()+"\n});\n")
-            f.close()
-            w.close()
+            write_file(source, js_path, write_command)
     print()
     for file in files:
-        printref=ref + "/" + file # What javascript sees
-        pathref=path + "/" + file # Actual file path in relation to .
-        if os.path.isdir(pathref) == True:
-            print(prefix + " " + printref)
-            w=open(output_file, "a")
-            w.write("mkfile('"+printref+"');\n")
-            w.close()
-            builddir(pathref, printref, level+1)        
+        js_path=ref + "/" + file # What javascript sees
+        source=path + "/" + file # Actual file path in relation to .
+        if os.path.isdir(source) == True:
+            print(prefix + " " + js_path)
+            out.write(write_command + "('"+js_path+"');\n")
+            builddir(source, js_path, level+1, write_command)        
 
 print("Building OS image")
-builddir(osroot, "", 0)
+builddir(osroot, "", 0, "mkfile")
 
-# Add kernel
-add_file("kernel/kernel.js")
-add_file("boot/bootloader.js")
+print("Building OS boot image")
+builddir(osboot, "", 0, "mkfile_boot")
+
+# Add bootloader file(s)
+add_file("bootloader/bootloader.js")
