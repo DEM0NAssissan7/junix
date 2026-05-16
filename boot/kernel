@@ -790,7 +790,19 @@ let errno;
     });
     wait = syscall(async function () {
       if (!c_task) panic("wait() was run outside of kernel context");
-      if (c_task.children.length === 0) return -1;
+      const task = c_task;
+      if (task.children.length === 0)
+        return asyncwait((resolve) => {
+          setTimeout(() => {
+            if (task.children.length === 0) {
+              resolve(-1);
+              return -1;
+            } else {
+              task.waiting = true;
+              asyncwait().then(resolve);
+            }
+          });
+        });
       c_task.waiting = true;
       return asyncwait();
     });
