@@ -797,6 +797,14 @@ let errno;
       const file = get_file(path);
       if (file.incomplete)
         throw new Error("File at " + path + " does not exist.");
+
+      // Get rid of all sibling threads
+      for (const task of c_task.siblings) {
+        if (task.pid === c_task.pid) continue;
+        task.dead = true;
+      }
+      check_dead_tasks();
+
       const code_object = file.inode.get_data();
       const code = new code_object();
 
