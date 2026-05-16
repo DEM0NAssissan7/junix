@@ -4,7 +4,7 @@ const boot = "ls0";
 const root = "ls1";
 let boot_options = [];
 let boot_option_index = 0;
-const recover_flag = 1;
+const recover_flag = 0;
 
 // Bootloader: run the kernel with the appropriate environment
 function populate_recovery() {

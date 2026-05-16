@@ -36,16 +36,18 @@ this.main = async function (args) {
   // Copy files
   printf("Copying update files to the rest of the system\n");
   if (!write_etc) {
-    copy_dirs("/mnt/update", "/bin", "/boot", "/sbin", "/service", "/usr");
-    copy_files("/mnt/update", "/etc/os-release");
-    copy_files("/mnt/update", "/boot/kernel");
-  } else copy_dirs("/"); // Copy all directories from update file
+    await copy_dirs(
+      "/mnt/update",
+      "/bin",
+      "/boot",
+      "/sbin",
+      "/service",
+      "/usr",
+    );
+    await copy_files("/mnt/update", "/etc/os-release");
+    await copy_files("/mnt/update", "/boot/kernel");
+  } else await copy_dirs("/"); // Copy all directories from update file
   completed = true;
-  while (true) {
-    const pid = await wait();
-    console.log(pid);
-    if (pid === -1) break;
-  }
 
   printf("\nFiles successfully copied!\n");
   printf("Unmounting update filesystems...\n");
@@ -63,21 +65,23 @@ this.main = async function (args) {
   }
   return 0;
 };
-function copy_dirs(source, ...names) {
+async function copy_dirs(source, ...names) {
   for (let name of names) {
     const dir = name;
     printf(source + dir + " -> " + dir + "\n");
     fork(() => {
       exec(source + "/bin/cp", ["-r", source + dir, dir]);
     });
+    await wait();
   }
 }
-function copy_files(source, ...names) {
+async function copy_files(source, ...names) {
   for (let name of names) {
     const path = name;
     printf(source + path + " -> " + path + "\n");
     fork(() => {
       exec(source + "/bin/cp", [source + path, path]);
     });
+    await wait();
   }
 }

@@ -634,7 +634,6 @@ let errno;
             if (c_task.pid === this.pid) interrupt();
             break;
         }
-        this.waiting = false;
         this.unfreeze(pid);
       }
       capture(signum, handler) {
@@ -740,14 +739,14 @@ let errno;
         }
       }
     }
-    let get_task = function (pid) {
-      for (let task of tasks) if (task.pid === pid) return task;
+    const get_task = function (pid) {
+      for (const task of tasks) if (task.pid === pid) return task;
     };
-    let get_task_index = function (pid) {
+    const get_task_index = function (pid) {
       for (let i = 0; i < tasks.length; i++) if (tasks[i].pid === pid) return i;
     };
-    let asyncwait = function (handler) {
-      const task = c_task;
+    const asyncwait = function (handler, target_task) {
+      const task = target_task ?? c_task;
 
       const time = get_time(3);
 
@@ -760,8 +759,9 @@ let errno;
       if (task.waiting) {
         return new Promise((resolve, reject) => {
           task.unfreeze = (retval) => {
-            resolve(retval);
+            task.waiting = false;
             returnvalue = retval;
+            resolve(retval);
           };
         }).then(post_wait);
       }
@@ -790,21 +790,9 @@ let errno;
     });
     wait = syscall(async function () {
       if (!c_task) panic("wait() was run outside of kernel context");
-      const task = c_task;
-      if (task.children.length === 0)
-        return asyncwait((resolve) => {
-          setTimeout(() => {
-            if (task.children.length === 0) {
-              resolve(-1);
-              return -1;
-            } else {
-              task.waiting = true;
-              asyncwait().then(resolve);
-            }
-          });
-        });
+      if (c_task.children.length === 0) return -1;
       c_task.waiting = true;
-      return asyncwait();
+      return await asyncwait();
     });
     exec = syscall(function (path, ...args) {
       const file = get_file(path);
@@ -839,9 +827,9 @@ let errno;
     });
     sleep = syscall(async function (time) {
       let task = c_task;
-      return asyncwait((a) =>
+      return asyncwait((handler) =>
         setTimeout(() => {
-          if (!task.dead) a();
+          if (!task.dead) handler();
         }, time),
       );
     });
