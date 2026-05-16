@@ -707,7 +707,7 @@ let errno;
       // A sibling is basically just another word for thread
       // Siblings share descriptors and sigoverrides and children (and code).
       create_sibling(handler, args) {
-        let t = new Task(
+        const t = new Task(
           this.user,
           this.working_path,
           this.cmdline,
@@ -723,7 +723,8 @@ let errno;
         t.is_main = false;
 
         t.siblings = this.siblings;
-        t.siblings.push(this);
+        this.siblings.push(t);
+        this.parent.children.push(t);
 
         t.modified = false;
         tasks.push(t);
