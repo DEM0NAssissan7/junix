@@ -370,13 +370,11 @@ let errno;
       if (filesystem.magic !== 20)
         throw new Error("Mount failed: not a filesystem");
       // Check if the filesystem already exists in the mount table
-      for (let fs of mount_table) {
+      for (const fs of mount_table) {
         if (!fs) continue;
         if (fs.uuid === filesystem.uuid)
           throw new Error(
-            "Mount failed: Filesystem is already mounted at mountpoint '" +
-              fs.parent_inode.filename +
-              "'",
+            `Mount failed: Filesystem ${filesystem.uuid} is already mounted at mountpoint '${fs.parent_inode.filename}'`,
           );
       }
 
@@ -385,10 +383,10 @@ let errno;
       mount_table.push(filesystem);
     };
     mount = syscall(function (device, path) {
-      let file = get_file(device);
+      const file = get_file(device);
       if (file.incomplete)
         throw new Error("Device does not exist at " + device);
-      let fs = file.inode.get_data();
+      const fs = file.inode.get_data();
       mount_fs(fs, path);
       kdebug("Device " + full_path(device) + " mounted at " + full_path(path));
     });
@@ -396,13 +394,13 @@ let errno;
       if (filesystem.fds > 0) return true;
       return false;
     }
-    let unmount_fs = function (filesystem) {
+    const unmount_fs = function (filesystem) {
       if (!filesystem || typeof filesystem !== "object")
         throw new Error("Filesystem invalid");
       if (filesystem.magic !== 20) throw new Error("Filesystem invalid");
       if (filesystem.mountpoint === false)
         throw new Error("Cannot unmount filesystem: not mounted");
-      let inode = filesystem.parent_inode;
+      const inode = filesystem.parent_inode;
 
       if (inode.mountpoint === false)
         throw new Error("Cannot unmount filesystem: not mounted(?)");
@@ -413,7 +411,7 @@ let errno;
       filesystem.mountpoint = false;
       filesystem.inodes[0].mountpoint = false;
     };
-    let unmount_all = function () {
+    const unmount_all = function () {
       for (let fs of mount_table)
         if (fs && typeof fs === "object") unmount_fs(fs);
     };
@@ -436,20 +434,20 @@ let errno;
     });
 
     // Kernel file tools
-    let full_path_dirty = function (path) {
+    const full_path_dirty = function (path) {
       let working_path = "";
       if (c_task) {
         if (path[0] !== "/") working_path = c_task.working_path;
       }
       return working_path + "/" + path;
     };
-    let map_full_path_names = function (path) {
+    const map_full_path_names = function (path) {
       return map_path_names(full_path_dirty(path));
     };
-    let full_path = function (path) {
+    const full_path = function (path) {
       return consolidate_path_names(map_full_path_names(path));
     };
-    let get_file = function (_path) {
+    const get_file = function (_path) {
       if (!_path) throw new Error("No path specified");
       let filesystem = mount_table[0];
       if (!filesystem) throw new Error("No root filesystem");
@@ -652,7 +650,7 @@ let errno;
           this.close(i);
         }
         // Kill siblings
-        for (let t of this.siblings) t.dead = true;
+        for (const t of this.siblings) t.dead = true;
         check_dead_tasks();
       }
       get_cpu_time() {
