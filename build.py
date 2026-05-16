@@ -22,7 +22,7 @@ add_file("libraries/mawi.js")
 add_file("libraries/stdlib.js")
 add_file("libraries/graphics.js")
 add_file("libraries/ld.js")
-add_file("kernel/filesystem.js")
+add_file("libraries/filesystem.js")
 add_file("fsbuild.js")
 
 def listdir_skip_hidden(path):
@@ -37,10 +37,18 @@ FUNCTION_TYPE = 1
 
 def write_file(source, js_path, write_command):
     s=open(source, "r")
-    if s.read(1) == "!": # string type
+    first_char = s.read(1)
+    if first_char == "!": # string type
         if(s.read(1) != "\n"):
             s.seek(1)
         out.write(write_command + "('"+js_path+"',`"+s.read()+"`);\n")
+    elif first_char == "[" or first_char == "{": # json type
+        s.seek(0)
+        out.write(write_command + "('"+js_path+"',JSON.parse(`"+s.read()+"`));\n")
+    elif first_char == "-": # literal type
+        if(s.read(1) != "\n"):
+            s.seek(1)
+        out.write(write_command + "('"+js_path+"',"+s.read()+");\n")
     else:
         s.seek(0)
         out.write(write_command + "('"+js_path+"',function(){\n"+s.read()+"\n});\n")

@@ -2,77 +2,99 @@
 
 let fd, loginconf;
 let started = false;
-this.main = async function() {
-    console.log("Initializing JUNIX...");
-    if(getpid() !== 1) {
-        fprintf(stderr, "init can only run on PID 1\n");
-        exit();
+const log_dir = "/var/log/init/";
+this.main = async function () {
+  console.log("Initializing JUNIX...");
+  if (getpid() !== 1) {
+    fprintf(stderr, "init can only run on PID 1\n");
+    exit();
+  }
+  if (!started) {
+    // Clear old logs
+    fd = opendir(log_dir);
+    const files = listdir(fd);
+    for (let file of files) {
+      unlink(log_dir + file);
     }
-    if(!started) {
-        // Clear old logs
-        fd = open("/var/log/init", "w");
-        write(fd, "");
-        close(fd);
+    closedir(fd);
 
-        open("/dev/null", "w") // Stdin
-        open("/var/log/init", "a"); // Stdout
-        dup(stdout); // Stderr
+    open("/dev/null", "w"); // Stdin
+    open(log_dir + "init", "a"); // Stdout
+    dup(stdout); // Stderr
 
-        fd = open("/etc/login.conf", "r");
-        loginconf = read(fd);
-        close(fd);
+    fd = open("/etc/login.conf", "r");
+    loginconf = read(fd);
+    close(fd);
 
-        fd = open("/etc/services", "r");
-        let paths = read(fd).split("\n");
-        close(fd);
-        for(let path of paths)
-            start(path);
-        close(stdin);
-        close(stdout);
-        close(stderr);
-        // await sleep(10);
-        post_driver();
-        started = true;
-    } else {
-        fprintf(stderr, "Running init after starting: something is going on.");
+    fd = open("/etc/services", "r");
+    const paths = read(fd).split("\n");
+    close(fd);
+    for (let path of paths) {
+      start_service(path);
     }
-}
+    close(stdin);
+    close(stdout);
+    close(stderr);
+    // await sleep(10);
+    post_driver();
+    started = true;
+  } else {
+    fprintf(stderr, "Running init after starting: something is going on.");
+  }
+};
 let wait = false;
 let finished = false;
 function post_driver() {
-    console.log("Running post driver-init");
-    // Create stdin, stdout, and stderr
-    open("/dev/keyboard", "r"); // Stdin
-    open("/dev/console", "a"); // Stdout 
-    dup(stdout); // Stderr
+  console.log("Running post driver-init");
+  // Create stdin, stdout, and stderr
+  open("/dev/keyboard", "r"); // Stdin
+  open("/dev/console", "a"); // Stdout
+  dup(stdout); // Stderr
 
-    fd = open("/etc/os-release", "r");
-    let deftable = map_variables(read(fd));
-    printf(get_variable_value("NAME", deftable) + " " +
-            get_variable_value("MAJOR_VERSION", deftable) +
-            " [" + get_variable_value("MINOR_VERSION", deftable) + "]\n\n");
-    close(fd);
+  fd = open("/etc/os-release", "r");
+  let deftable = map_variables(read(fd));
+  printf(
+    get_variable_value("NAME", deftable) +
+      " " +
+      get_variable_value("MAJOR_VERSION", deftable) +
+      " [" +
+      get_variable_value("MINOR_VERSION", deftable) +
+      "]\n\n",
+  );
+  close(fd);
 
-    printf("Reading startup script from /etc/rc\n");
-    fd = open("/etc/rc", "r");
-    let paths = read(fd).split("\n");
-    close(fd);
-    let c;
-    for(let command of paths) {
-        c = parse_command(command);
-        console.log("Starting " + c.cmd);
-        start(c.cmd, c.args);
-    }
-    printf("\n\n");
+  printf("Reading startup script from /etc/rc\n");
+  fd = open("/etc/rc", "r");
+  let paths = read(fd).split("\n");
+  close(fd);
+  let c;
+  for (let command of paths) {
+    c = parse_command(command);
+    console.log("Starting " + c.cmd);
+    start_rc(c.cmd, c.args);
+  }
+  printf("\n\n");
 
-    wait = true;
-    finished = true;
+  wait = true;
+  finished = true;
 }
-function start (path, args) {
-    printf("Starting " + path)
-    console.log("starting " + path);
-    fork(() => {
-        printf(" [" + getpid() + "]\n");
-        exec(path, args, map_variables(loginconf));
-    });
+function start_rc(path, args) {
+  printf("Starting " + path);
+  console.log("starting " + path);
+  fork(() => {
+    printf(" [" + getpid() + "]\n");
+    exec(path, args, map_variables(loginconf));
+  });
+}
+function start_service(path, args) {
+  printf("Starting " + path);
+  console.log("starting " + path);
+  fork(() => {
+    printf(" [" + getpid() + "]\n");
+    close(stdout);
+    close(stderr);
+    open(log_dir + get_filename(path), "a"); // Stdout
+    dup(stdout);
+    exec(path, args, map_variables(loginconf));
+  });
 }

@@ -1,64 +1,77 @@
-let disks = 1;
+let disks = 2;
 let fd;
-this.main = async function() {
-    try {
-        let string, fd, fs;
-        let success = false;
-        for(let i = 0; i < localStorage.length; i++) {
-            string = localStorage.getItem("disk" + (i+1));
-            if(string == null) {
-                success = true;
-                break;
-            }
-            fs = new JFS();
-            fs.parse(string);
-            initiate_fs(fs, disks);
-            fd = fopen("/dev/disk" + disks++, "w");
-            printf("Created /dev/disk" + (disks-1) + "\n");
-            write(fd, fs);
-            fclose(fd);
-        }
-        if(!success) throw "Needs initialization";
-        printf("On-device storage has been mapped \n");
-    } catch (e) {
-        printf(e + "\n");
-        create_disk();
-        printf("On-device storage initialized\n");
-    }
-    fd = fopen("/dev/localstorage", "w");
-    sync();
-    thread(sync_disks);
-    while(true) {
-        call_watcher()
-        await sleep(100);
-    }
+const use_tmpfs = true;
+function link_filesystem(name, fs) {
+  if (fs.magic !== 20) {
+    fprintf(`Cannot link filesystem ${name}: invalid magic header`);
+    return;
+  }
+  initiate_fs(fs, name);
+  fd = fopen("/dev/" + name, "w");
+  printf("Created /dev/" + name + "\n");
+  write(fd, fs);
+  fclose(fd);
 }
+function link_localstorage(name, localstorage_key) {
+  string = localStorage.getItem(localstorage_key);
+  if (string == null) {
+    success = true;
+    return;
+  }
+  fs = new JFS();
+  fs.parse(string);
+  link_filesystem(name, fs);
+}
+this.main = async function () {
+  if (recovery_root_filesystem && recovery_boot_filesystem) {
+    printf("Linking recovery filesystems\n");
+    link_filesystem("jrfs0", recovery_boot_filesystem);
+    link_filesystem("jrfs1", recovery_root_filesystem);
+  }
+
+  link_filesystem("tmpfs", new JFS());
+
+  if (!access("/dev/ls2")) {
+    create_disk();
+  }
+
+  fd = fopen("/dev/localstorage", "w");
+  sync();
+  thread(sync_disks);
+  while (true) {
+    call_watcher();
+    await sleep(100);
+  }
+};
 async function sync_disks() {
-    sync(); // Sync disks every 30 seconds
-    await sleep(1000 * 30);
+  sync(); // Sync disks every 30 seconds
+  await sleep(1000 * 30);
 }
 function initiate_fs(fs, disk_id) {
-    fs.sync = function() {
-        localStorage.setItem("disk" + disk_id, fs.stringify());
-        console.log("Synced disk");
-    }
+  fs.sync = function () {
+    localStorage.setItem(disk_id, fs.stringify());
+    console.log("Synced disk");
+  };
 }
 function create_disk() {
-    let fs = new JFS();
-    initiate_fs(fs, disks);
-    localStorage.setItem("disk" + disks, fs.stringify());
-    let _fd = fopen("/dev/disk" + disks, "w");
-    write(_fd, fs);
-    fclose(_fd);
-    printf("Created /dev/disk" + disks++ + "\n");
+  let fs = new JFS();
+  const id = "ls" + disks;
+  printf("Creating /dev/" + id + "\n");
+  initiate_fs(fs, id);
+  localStorage.setItem(id, fs.stringify());
+  let _fd = fopen("/dev/" + id, "w");
+  write(_fd, fs);
+  fclose(_fd);
+  printf("Created /dev/" + id + "\n");
+  disks++;
 }
 let input;
 function call_watcher() {
-    input = read(fd);
-    if(input.length > 0) {
-        if(input == "c") {
-            create_disk();
-        }
+  input = read(fd);
+  if (input.length > 0) {
+    if (input == "c") {
+      create_disk();
     }
-    write(fd, "");
+  }
+  write(fd, "");
 }

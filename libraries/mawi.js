@@ -120,6 +120,11 @@ let clear_cookies = function() {
         document.cookie = name + "=;expires=Thu, 01 Jan 1970 00:00:00 GMT";
     }
 }
+function eliminate_func(string) {
+    let i1 = string.indexOf("{") + 1;
+    let i2 = string.lastIndexOf("}");
+    return string.substr(i1, i2 - i1);
+}
 
 // Encoding and decoding
 let encode = function(uncoded_string, code) {

@@ -1,6 +1,5 @@
-this.main = function(args) {
-    let device = args[0];
-    let mountpoint = args[1];
-    mount(device, mountpoint);
-    exit();
-}
+this.main = function (args) {
+  let device = args[0];
+  let mountpoint = args[1];
+  mount(device, mountpoint);
+};

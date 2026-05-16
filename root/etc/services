@@ -1,7 +1,7 @@
 !
-/service/update
 /service/disk
 /service/mount
+/service/update
 /service/keyboard
 /service/graphics
 /service/mouse

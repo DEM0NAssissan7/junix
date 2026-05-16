@@ -4,11 +4,6 @@
     let is_loaded = (envp) => {
         return get_variable_value(pid_varname, envp) === getpid();
     }
-    let eliminate_func = (string) => {
-        let i1 = string.indexOf("{") + 1;
-        let i2 = string.lastIndexOf("}");
-        return string.substr(i1, i2 - i1);
-    }
     function load(library_name, envp) {
         if(is_loaded(envp)) return null;
         // When using this function, pass in the env deftable

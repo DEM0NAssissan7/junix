@@ -1,4 +1,4 @@
-this.main = function() {
-    exec("/usr/bin/junixupd", []);
-    return 0;
-}
+this.main = function () {
+  exec("/usr/bin/junix-update", []);
+  return 0;
+};

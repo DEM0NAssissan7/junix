@@ -1,5 +1,13 @@
-this.main = function() {
-    // Mount permanent storage
-    mount("/dev/disk1", "/home");
-    exit();
-}
+this.main = function () {
+  // Mount devices from /etc/fstab
+  let fd = fopen("/etc/fstab", "r");
+  const text = read(fd);
+  const lines = text.split("\n");
+  for (let line of lines) {
+    const spl = line.split(" ");
+    const device = spl[0];
+    const mountpoint = spl[1];
+    mount(device, mountpoint);
+  }
+  exit();
+};

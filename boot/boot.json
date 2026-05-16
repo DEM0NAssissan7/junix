@@ -1,0 +1,8 @@
+[
+  {
+    "name": "JUNIX",
+    "disk": "ls0",
+    "kernel": "kernel",
+    "root": "/dev/ls1"
+  }
+]

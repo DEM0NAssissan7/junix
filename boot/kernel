@@ -40,6 +40,7 @@ var unlink; // Delete an inode from the filesystem
 /* Directory management */
 
 var mkdir; // Make a new directory
+var rmdir; // Remove an empty directory
 var opendir; // Make a new directory file descriptor from directory path
 var listdir; // List file contents of directory file descriptor
 var closedir; // Close directory file descriptor
@@ -238,7 +239,7 @@ let errno;
       if (!path) throw new Error("You must specify a path");
       if (!flags) throw new Error("No flags specified");
 
-      let file = get_file(path);
+      const file = get_file(path);
       let inode = file.inode;
       if (file.incomplete) {
         if (flags === "r" || file.noparent)
@@ -254,7 +255,7 @@ let errno;
         );
       }
 
-      let descriptor = new FileDescriptor(
+      const descriptor = new FileDescriptor(
         inode.get_data(),
         flags,
         inode.mode,
@@ -289,7 +290,7 @@ let errno;
       c_task.duplicate(fd);
     });
     close = syscall(function (fd) {
-      let descriptor = c_task.get_descriptor(fd);
+      const descriptor = c_task.get_descriptor(fd);
       // descriptor.flush();
       c_task.close(fd);
     });
@@ -318,18 +319,27 @@ let errno;
           file.inode.mode,
         );
     });
+    rmdir = syscall(function (path) {
+      let f = get_file(path);
+      if (f.inode.type !== "d")
+        throw new Error("rmdir only works on directories");
+      if (f.inode.get_data().length !== 0)
+        throw new Error(`Cannot remove non-empty directory`);
+      f.filesystem.delete_file(f.inode.index);
+    });
     opendir = syscall(function (path) {
-      let file = get_file(path);
+      const file = get_file(path);
       if (file.incomplete)
         throw new Error("Directory " + path + " does not exist");
-      if (file.inode.type !== "d")
+      const inode = file.inode;
+      if (inode.type !== "d")
         throw new Error("opendir() failed: not a directory [" + path + "]");
-      let descriptor = new FileDescriptor(
-        file.inode.get_data(),
+      const descriptor = new FileDescriptor(
+        inode.get_data(),
         "r",
-        755,
+        inode.mode,
         c_task.user,
-        file.inode,
+        inode,
         file.filesystem,
       );
       return c_task.create_descriptor(descriptor);
@@ -338,8 +348,8 @@ let errno;
       return c_task.get_descriptor(fd).listdir();
     });
     closedir = syscall(function (fd) {
-      let descriptor = c_task.get_descriptor(fd);
-      c_task.close(descriptor);
+      const descriptor = c_task.get_descriptor(fd);
+      c_task.close(fd);
     });
     dirname = syscall(function (path) {
       return full_path(path);
@@ -439,49 +449,34 @@ let errno;
     let full_path = function (path) {
       return consolidate_path_names(map_full_path_names(path));
     };
-    let get_file = function (path) {
-      if (!path) throw new Error("No path specified");
-      let path_names = map_full_path_names(path);
+    let get_file = function (_path) {
+      if (!_path) throw new Error("No path specified");
       let filesystem = mount_table[0];
       if (!filesystem) throw new Error("No root filesystem");
-      let index = 0;
-      let inode = filesystem.get_inode(index);
-      let name_index = 0;
+      let path = full_path(_path);
 
-      let steps = path_names.length;
-      while (steps > 0) {
-        inode = filesystem.get_inode(index);
-        if (inode.type === "l") return get_file(inode.get_data());
-        if (inode.type !== "d") break;
-        let success = false;
-
-        let data = inode.get_data();
-        let path_name = path_names[name_index];
-        for (let _index of data) {
-          let _inode = filesystem.get_inode(_index);
-          if (_inode.filename === path_name) {
-            success = true;
-            index = _index;
-            inode = _inode;
-            if (_inode.mountpoint !== false) {
-              filesystem = mount_table[_inode.mountpoint];
-              index = 0;
-              inode = filesystem.get_inode(index);
-            }
-            break;
-          }
+      let cyc = 0;
+      while (true) {
+        cyc++;
+        if (cyc > 1000) throw new Error(`Exceeded max cycle count`);
+        const t = filesystem.traverse_inode(path);
+        t.filesystem = filesystem; // Add the filesystem to the traversal object
+        const inode = t.inode;
+        if (
+          inode.mountpoint !== false &&
+          filesystem.mountpoint !== inode.mountpoint
+        ) {
+          // The inode has a filesystem mounted at it
+          filesystem = mount_table[inode.mountpoint];
+          // Traverse the remaning path on the filesystem
+          path = t.remaining_path;
+          continue;
         }
-        if (!success) break;
-        name_index++;
-        steps--;
-      }
+        if (inode.type === "l") return get_file(inode.get_data());
 
-      return {
-        filesystem: filesystem,
-        inode: inode,
-        incomplete: steps !== 0,
-        noparent: steps > 1,
-      };
+        // If we aren't going to another filesystem or symlink, we completed the traversal
+        return t;
+      }
     };
 
     // Context Management
@@ -511,7 +506,7 @@ let errno;
       cputime = 0;
       exec_time = 0;
 
-      initialized = false;
+      modified = false;
 
       siblings = [this];
       is_main = true;
@@ -575,17 +570,19 @@ let errno;
         t.parent_pid = this.pid;
         t.descriptor_table = this.clone_descriptors();
 
+        t.modified = false;
         // Run intermediate code because javascript is unable to behave exactly like a real kernel
+        tasks.push(t);
+        this.children.push(t);
         if (intermediate_code) {
-          let context = c_task;
+          const context = c_task;
           t.run_ctx(intermediate_code, is_async(intermediate_code), () => {
-            if (!t.dead) {
-              tasks.push(t);
-              this.children.push(t);
+            if (!t.modified) {
+              t.die();
             } else {
               // Do not signal immediately to allow wait() to set in before it is signaled. This is useful for the shell.
               setTimeout(() => {
-                this.signal(20);
+                this.signal(20, t.pid);
               });
             }
             c_task = context;
@@ -609,23 +606,23 @@ let errno;
         return r;
       }
       get_descriptor(fd) {
-        let descriptor = this.descriptor_table[fd];
-        if (!descriptor) throw new Error("No descriptor at " + fd);
+        const descriptor = this.descriptor_table[fd];
+        if (!descriptor) throw new Error(`No file descriptor '${fd}'`);
         return descriptor;
       }
       close(fd) {
         if (!this.descriptor_table[fd])
-          throw new Error("No file descriptor at " + fd);
+          throw new Error(`No file descriptor '${fd}'`);
         this.descriptor_table[fd].close();
         this.descriptor_table[fd] = undefined;
       }
       duplicate(fd) {
-        let descriptor = this.get_descriptor(fd);
+        const descriptor = this.get_descriptor(fd);
         if (descriptor.filesystem) descriptor.filesystem.fds++;
         return this.add_descriptor(descriptor);
       }
-      signal(signum) {
-        let override = this.sigoverrides[signum];
+      signal(signum, pid) {
+        const override = this.sigoverrides[signum];
         if (override) {
           override(signum);
         }
@@ -640,7 +637,7 @@ let errno;
             break;
         }
         this.waiting = false;
-        this.unfreeze();
+        this.unfreeze(pid);
       }
       capture(signum, handler) {
         this.sigoverrides[signum] = handler;
@@ -650,12 +647,12 @@ let errno;
       }
       kill() {
         for (let i = 0; i < this.descriptor_table.length; i++) {
-          let descriptor = this.descriptor_table[i];
+          const descriptor = this.descriptor_table[i];
           if (!descriptor) continue;
           this.close(i);
         }
         // Kill siblings
-        for (let t of this.siblings) if (!t.dead) t.dead = true;
+        for (let t of this.siblings) t.dead = true;
         check_dead_tasks();
       }
       get_cpu_time() {
@@ -664,12 +661,7 @@ let errno;
       }
       run(time) {
         this.exec_time = time;
-        this.initialized = true;
-        this.run_ctx(this.handler, is_async(this.handler), () => {
-          if (!this.initialized)
-            // Prevent killing on finished execution if the process has been reinitialized with a new executable
-            this.die();
-        });
+        this.run_ctx(this.handler, is_async(this.handler), () => {});
       }
       run_ctx(_exec, useasync, after) {
         let onerror = (e) => {
@@ -735,6 +727,7 @@ let errno;
         t.siblings = this.siblings;
         t.siblings.push(this);
 
+        t.modified = false;
         tasks.push(t);
         t.run(get_time(3));
         return t;
@@ -755,20 +748,21 @@ let errno;
       for (let i = 0; i < tasks.length; i++) if (tasks[i].pid === pid) return i;
     };
     let asyncwait = function (handler) {
-      let task = c_task;
+      const task = c_task;
 
       const time = get_time(3);
 
-      let post_wait = () => {
+      let returnvalue;
+      const post_wait = () => {
         task.waited += get_time(3) - time;
         c_task = task;
+        return returnvalue;
       };
       if (task.waiting) {
-        let unfreeze = task.unfreeze;
-        return new Promise((a) => {
-          task.unfreeze = () => {
-            // unfreeze();
-            a();
+        return new Promise((resolve, reject) => {
+          task.unfreeze = (retval) => {
+            resolve(retval);
+            returnvalue = retval;
           };
         }).then(post_wait);
       }
@@ -797,15 +791,16 @@ let errno;
     });
     wait = syscall(async function () {
       if (!c_task) panic("wait() was run outside of kernel context");
+      if (c_task.children.length === 0) return -1;
       c_task.waiting = true;
       return asyncwait();
     });
     exec = syscall(function (path, ...args) {
-      let file = get_file(path);
+      const file = get_file(path);
       if (file.incomplete)
         throw new Error("File at " + path + " does not exist.");
-      let code_object = file.inode.get_data();
-      let code = new code_object();
+      const code_object = file.inode.get_data();
+      const code = new code_object();
 
       c_task.code = code;
       c_task.cmdline = path;
@@ -813,7 +808,7 @@ let errno;
       c_task.handler = code.main;
       c_task.args = args;
 
-      c_task.initialized = false;
+      c_task.modified = true;
       c_task.run(get_time(3));
       interrupt();
     });
@@ -838,7 +833,7 @@ let errno;
     kill = syscall(function (pid, sig) {
       let task = get_task(pid);
       if (!task) throw new Error("No process with PID " + pid);
-      task.signal(sig);
+      task.signal(sig, c_task.pid);
     });
     signal = syscall(function (signum, handler) {
       c_task.capture(signum, handler);
@@ -861,14 +856,17 @@ let errno;
     // Passive Task Management
     function check_dead_tasks() {
       for (let i = 0; i < tasks.length; i++) {
-        let task = tasks[i];
+        const task = tasks[i];
         if (task.dead) {
-          for (let j = 0; j < task.siblings.length; j++)
-            if (task.siblings[j].pid === task.pid) task.siblings.splice(j, 1);
+          for (let j = 0; j < task.siblings.length; j++) {
+            if (task.siblings[j].pid === task.pid) {
+              task.siblings.splice(j, 1);
+              j--;
+            }
+          }
           tasks.splice(i, 1);
-          if (task.siblings.length === 0)
-            // If all siblings (threads) are dead
-            task.parent.signal(20);
+          // If all siblings (threads) are dead
+          if (task.siblings.length === 0) task.parent.signal(20, task.pid);
           i--;
           continue;
         }
@@ -894,6 +892,7 @@ let errno;
     let mount_root = function (filesystem) {
       filesystem.mount(0, "/");
       mount_table[0] = filesystem;
+      kdebug("Initial rootfs mounted");
     };
     let mount_root_device = function (device) {
       let file = get_file(device);
@@ -950,15 +949,7 @@ let errno;
     mkdir("/dev"); // Create a temporary /dev
     create_device_pointer(devfs, "devfs");
 
-    // Disk drivers
-
-    /* Disk driver: add disks */
-    {
-      let disks = 0;
-      function add_disk(filesystem) {
-        create_device_pointer(filesystem, "disk" + disks++);
-      }
-    }
+    // Device drivers
 
     // /dev/null > a secure way to redirect unwanted data
     {
@@ -968,88 +959,36 @@ let errno;
       create_device_inode(inode);
     }
 
-    /* Localstorage driver: Allow mounting root from local storage */
+    /* Localstorage driver: Retrieve & objectify disks from localstorage */
     function localstorage_driver() {
       kdebug("Starting localstorage driver");
-      let string = localStorage.getItem("root");
-      let fs = new JFS();
-      add_disk(fs);
-      create_junix_update_file();
-      if (string === null) {
-        if (kargs.initfs_table) {
-          kwarn("Populating localstorage with initfs table");
-          rootfs_build(false);
-          string = mount_table[0].stringify();
-        } else {
-          panic(
-            "Cannot boot: localstorage driver failed to get 'root' from browser data. There was no fallback initfs table.",
-          );
+      for (let i = 0; ; i++) {
+        const name = "ls" + i;
+        let string = localStorage.getItem(name);
+        if (string === null) break;
+        let filesystem = new JFS();
+        try {
+          filesystem.parse(string);
+          filesystem.sync = function () {
+            localStorage.setItem(name, filesystem.stringify());
+          };
+          create_device_pointer(filesystem, name);
+        } catch {
+          console.error(`Could not create ${name}: invalid filesystem`);
         }
       }
-      fs.parse(string);
-      fs.sync = function () {
-        localStorage.setItem("root", fs.stringify());
-      };
     }
-    if (kargs.use_localstorage_driver) localstorage_driver();
+    localstorage_driver();
 
     // Root mounting
-    /* 'rootfs_build' driver */
-    function rootfs_build(create_device) {
-      kdebug("Building root filesystem from fs definition table");
-      let table = kargs.initfs_table;
-      for (let entry of table) {
-        if (entry.length === 1) mkdir(entry[0]);
-        if (entry.length === 2) {
-          let file = get_file(entry[0]);
-          mount_table[0].create_file(
-            file.inode.index,
-            get_filename(entry[0]),
-            entry[1],
-            "-",
-            0,
-            711,
-          );
-        }
-      }
-      if (create_device) {
-        add_disk(mount_table[0]);
-      }
+    create_devfs(); // Create /dev filesystem using device pointers
+    if (!kargs.root) {
+      panic("Cannot initialize. No root identifier specified.");
     }
-    function create_junix_update_file() {
-      let old_fs = mount_table[0];
-      mount_table[0] = new JFS();
-      kdebug("Creating JUNIX update file");
-      let table = kargs.initfs_table;
-      for (let entry of table) {
-        if (entry.length === 1) mkdir(entry[0]);
-        if (entry.length === 2) {
-          let file = get_file(entry[0]);
-          mount_table[0].create_file(
-            file.inode.index,
-            get_filename(entry[0]),
-            entry[1],
-            "-",
-            0,
-            711,
-          );
-        }
-      }
-      create_device_pointer(mount_table[0], "jupd");
-      mount_table[0] = old_fs;
-    }
-    if ((kargs.initfs_table && !kargs.root) || kargs.use_initfs_only) {
-      rootfs_build(true);
-    }
-    create_devfs(); // Create /dev filesystem
-    if (kargs.root && !kargs.use_initfs_only) {
-      kdebug("Mounting root from device map");
-      mount_root_device(kargs.root);
-      unmount_fs(devfs);
-      mount_fs(devfs, "/dev");
-    } else if (!kargs.initfs_table) {
-      kwarn("Kernel running headless. Tmpfs being used for root.");
-    }
+    kdebug("Mounting root from device map");
+    mount_root_device(kargs.root);
+    unmount_fs(devfs);
+    mount_fs(devfs, "/dev");
 
     // Init process
     function create_init() {
@@ -1065,7 +1004,7 @@ let errno;
       );
     }
     function run_init() {
-      tasks[0].run();
+      tasks[0].run(get_time(3));
     }
     create_init();
     run_init();
@@ -1129,7 +1068,7 @@ let errno;
             reset();
             unmount_all();
             stop_kernel();
-            kernel_entry(kargs); // Re-enter kernel with the same argument. This will completely reinitialize the system.
+            location.reload();
             rebooting = false;
             break;
           case 4:
@@ -1200,7 +1139,7 @@ let errno;
     function get_user_time() {
       let t = 0;
       const time = get_time(3);
-      for (let task of tasks) {
+      for (const task of tasks) {
         t += time - task.time_created - task.waited;
       }
       return t;

@@ -1,2 +1,4 @@
 !
-/dev/disk0 /home
+/dev/ls2 /home
+/dev/ls0 /boot
+/dev/tmpfs /tmp

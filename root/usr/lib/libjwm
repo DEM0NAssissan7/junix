@@ -15,278 +15,281 @@ let wm_mouse_clicked = false;
 
 let ctl;
 let display = {
-    width: 400,
-    height: 400
-}
+  width: 400,
+  height: 400,
+};
 
 /* General Window Structures */
 let windows = [];
 class Win {
-    events = {
-        mouse: {
-            x: 0,
-            y: 0,
-            vectorX: 0,
-            vectorY: 0,
-            down: false
-        },
-        key: ""
-    }
-    inactive = false;
-    update = false;
-    constructor(title, width, height) {
-        this.resize(width, height)
-        this.title = title;
-        this.x = display.width / 2 - width / 2;
-        this.y = display.height / 2 - height /2;
-    }
-    resize(width, height) {
-        this.canvas = new OffscreenCanvas(width, height);
-        this.ctx = this.canvas.getContext("2d");
-    }
-    draw(handler) {
-        handler(this.ctx, this.events);
-        this.update = true;
-    }
-    close() {
-        ctl.close_window(this);
-    }
-    render(ctx) {
-        ctx.drawImage(this.canvas, this.x, this.y);
-    }
+  events = {
+    mouse: {
+      x: 0,
+      y: 0,
+      vectorX: 0,
+      vectorY: 0,
+      down: false,
+    },
+    key: "",
+  };
+  inactive = false;
+  update = false;
+  constructor(title, width, height) {
+    this.resize(width, height);
+    this.title = title;
+    this.x = display.width / 2 - width / 2;
+    this.y = display.height / 2 - height / 2;
+  }
+  resize(width, height) {
+    this.canvas = new OffscreenCanvas(width, height);
+    this.ctx = this.canvas.getContext("2d");
+  }
+  draw(handler) {
+    handler(this.ctx, this.events);
+    this.update = true;
+  }
+  close() {
+    ctl.close_window(this);
+  }
+  render(ctx) {
+    ctx.drawImage(this.canvas, this.x, this.y);
+  }
 }
 function draw_windows() {
-    for(let window of windows) {
-        window.render(ctx);
-        window.update = false;
-    }
+  for (let window of windows) {
+    window.render(ctx);
+    window.update = false;
+  }
 }
-
 
 /* Window Manager */
 
 function set_framerate(f) {
-    framerate = f;
-    // persistent_frames = f / 10;
-    persistent_frames = 0;
+  framerate = f;
+  // persistent_frames = f / 10;
+  persistent_frames = 0;
 }
 set_framerate(100);
 {
-    let old_time = get_time();
-    let get_framerate = () => {
-        let time = get_time();
-        let k = 1000/(time - old_time);
-        old_time = time;
-        return k;
-    }
-    function display_framerate() {
-        let framerate = get_framerate();
-        ctx.fillStyle = "black";
-        ctx.fillText(framerate, 20, 20);
-    }
+  let old_time = get_time();
+  let get_framerate = () => {
+    let time = get_time();
+    let k = 1000 / (time - old_time);
+    old_time = time;
+    return k;
+  };
+  function display_framerate() {
+    let framerate = get_framerate();
+    ctx.fillStyle = "black";
+    ctx.fillText(framerate, 20, 20);
+  }
 }
 
 const inactive_window_timeout = 2000;
 function check_unresponsive_windows() {
-    const time = get_time();
-    for(let window of windows) {
-        if(!window.update)
-            window.inactive = time;
-        else
-            window.inactive = false;
-        if(window.inactive !== false && time - window.inactive > inactive_window_timeout)
-            window.close();
+  const time = get_time();
+  for (let window of windows) {
+    if (!window.update) window.inactive = time;
+    else window.inactive = false;
+    if (
+      window.inactive !== false &&
+      time - window.inactive > inactive_window_timeout
+    ) {
+      printf(`${window.title} being closed due to inactivity`);
+      window.close();
     }
+  }
 }
 
 let detect_wm_changes = () => {
-    check_unresponsive_windows();
-    let mouse = read(mouse_fd);
-    if (mouse.vectorX !== 0 || mouse.vectorY !== 0) {
-        active_persistence = persistent_frames;
-        return true;
-    }
-    // See if any windows want to update
-    for(let window of windows) {
-        if(window.update)
-            return true;
-    }
-    // Allow frames to persist running even when there are no changes. Makes the system more consistent.
-    // if(active_persistence > 0) {
-    //     console.log(active_persistence);
-    //     active_persistence--;
-    //     return true;
-    // }
-    return false;
-}
+  check_unresponsive_windows();
+  let mouse = read(mouse_fd);
+  if (mouse.vectorX !== 0 || mouse.vectorY !== 0) {
+    active_persistence = persistent_frames;
+    return true;
+  }
+  // See if any windows want to update
+  for (let window of windows) {
+    if (window.update) return true;
+  }
+  // Allow frames to persist running even when there are no changes. Makes the system more consistent.
+  // if(active_persistence > 0) {
+  //     console.log(active_persistence);
+  //     active_persistence--;
+  //     return true;
+  // }
+  return false;
+};
 
 let window_count = 0;
 class WMctl {
-    constructor(width, height) {
-        this.width = width;
-        this.height = height;
+  constructor(width, height) {
+    this.width = width;
+    this.height = height;
+  }
+  push_window(window) {
+    window.id = window_count++;
+    windows.push(window);
+  }
+  close_window(window) {
+    for (let i = 0; i < windows.length; i++) {
+      if (windows[i].id === window.id) {
+        windows.splice(i, 1);
+        break;
+      }
     }
-    push_window(window) {
-        window.id = window_count++;
-        windows.push(window);
-    }
-    close_window(window) {
-        for(let i = 0; i < windows.length; i++) {
-            if(windows[i].id === window.id) {
-                windows.splice(i, 1);
-                break;
-            }
-        }
-    }
+  }
 }
 
 function create_wmctl(runtime_dir, width, height) {
-    let fd = fopen(runtime_dir, "w");
-    write(fd, new WMctl(width, height));
-    fclose(fd);
+  let fd = fopen(runtime_dir, "w");
+  write(fd, new WMctl(width, height));
+  fclose(fd);
 }
 
 async function init_wm(envp) {
-    framebuff_fd = fopen(framebuffer_device, "w");
-    mouse_fd = fopen(mouse_device, "r");
-    // Set mode
-    let window_fd = fopen("/dev/window", "r");
-    let _window = read(window_fd);
-    write(framebuff_fd, {
-        modeset: true,
-        width: _window.width - 16,
-        height: _window.height - 16
-    });
-    wallpaper_canvas = new OffscreenCanvas(_window.width, _window.height);
-    create_default_wallpaper();
-    fclose(window_fd);
+  framebuff_fd = fopen(framebuffer_device, "w");
+  mouse_fd = fopen(mouse_device, "r");
+  // Set mode
+  let window_fd = fopen("/dev/window", "r");
+  let _window = read(window_fd);
+  write(framebuff_fd, {
+    modeset: true,
+    width: _window.width - 16,
+    height: _window.height - 16,
+  });
+  wallpaper_canvas = new OffscreenCanvas(_window.width, _window.height);
+  create_default_wallpaper();
+  fclose(window_fd);
 
-    ctx_fd = fopen(ctx_device, "r");
-    ctx = read(ctx_fd);
-    create_cursor_image(default_cursor_handler);
-    update_wm(true);
+  ctx_fd = fopen(ctx_device, "r");
+  ctx = read(ctx_fd);
+  create_cursor_image(default_cursor_handler);
+  update_wm(true);
 
-    const runtime_dir = "/run/wm/wmctl";
-    mkdir("/run/wm");
-    create_wmctl(runtime_dir, _window.width, _window.height);
-    set_variable_value("RUNTIME_DIR", runtime_dir, envp);
+  const runtime_dir = "/run/wm/wmctl";
+  mkdir("/run/wm");
+  create_wmctl(runtime_dir, _window.width, _window.height);
+  set_variable_value("RUNTIME_DIR", runtime_dir, envp);
 }
 
 function update_wm(force_run, handler) {
-    if (detect_wm_changes() || force_run) {
-        draw_background();
-        // Render cursor
-        draw_windows();
-        if(handler)
-            handler();
-        render_cursor();
-    }
+  if (detect_wm_changes() || force_run) {
+    draw_background();
+    // Render cursor
+    draw_windows();
+    if (handler) handler();
+    render_cursor();
+  }
 }
 function get_focused_window(mouse) {
-    let focused_index = windows.length - 1;
-    for(let i = 0; i < windows.length; i++) {
-        let window = windows[i];
-        if(mouse.x >= window.x && mouse.x <= window.x + window.canvas.width
-            && mouse.y >= window.y && mouse.y <= window.y + window.canvas.height
-        ) {
-            focused_index = i;
-        }
+  let focused_index = windows.length - 1;
+  for (let i = 0; i < windows.length; i++) {
+    let window = windows[i];
+    if (
+      mouse.x >= window.x &&
+      mouse.x <= window.x + window.canvas.width &&
+      mouse.y >= window.y &&
+      mouse.y <= window.y + window.canvas.height
+    ) {
+      focused_index = i;
     }
+  }
 
-    // Move focused window to the front by splicing it and moving it to the front
-    let window = windows[focused_index];
-    if(window) {
-        windows.splice(focused_index, 1);
-        windows.push(window);
-    }
+  // Move focused window to the front by splicing it and moving it to the front
+  let window = windows[focused_index];
+  if (window) {
+    windows.splice(focused_index, 1);
+    windows.push(window);
+  }
 }
 function send_events() {
-    for(let window of windows) {
-        window.events.key = ""; // Clear the key buffer
-    }
-    let mouse = read(mouse_fd);
-    let key = read(stdin);
+  for (let window of windows) {
+    window.events.key = ""; // Clear the key buffer
+  }
+  let mouse = read(mouse_fd);
+  let key = read(stdin);
 
-    if(!wm_mouse_clicked && mouse.down) {
-        // Change focus when clicked
-        get_focused_window(mouse);
-        wm_mouse_clicked = true;
-    } else if(!mouse.down) {
-        wm_mouse_clicked = false;
-    }
+  if (!wm_mouse_clicked && mouse.down) {
+    // Change focus when clicked
+    get_focused_window(mouse);
+    wm_mouse_clicked = true;
+  } else if (!mouse.down) {
+    wm_mouse_clicked = false;
+  }
 
-    let window = windows[windows.length - 1];
+  let window = windows[windows.length - 1];
 
-    if(window) {
-        let _mouse = window.events.mouse;
-        _mouse.x = mouse.x - window.x;
-        _mouse.y = mouse.y - window.y;
-        _mouse.down = mouse.down;
-        window.events.key = key;
-    }
+  if (window) {
+    let _mouse = window.events.mouse;
+    _mouse.x = mouse.x - window.x;
+    _mouse.y = mouse.y - window.y;
+    _mouse.down = mouse.down;
+    window.events.key = key;
+  }
 }
 
 function create_cursor_image(handler) {
-    let _ctx = cursor_canvas.getContext("2d");
-    handler(_ctx);
+  let _ctx = cursor_canvas.getContext("2d");
+  handler(_ctx);
 }
 function default_cursor_handler(ctx) {
-    ctx.strokeStyle = 'white';
-    ctx.fillStyle = 'black';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    //Base (left)
-    ctx.moveTo(0, 0);
-    ctx.lineTo(0, 13);
-    //Handle (left)
-    ctx.lineTo(3, 10);
-    //Handle base (l/r)
-    ctx.lineTo(5, 15);
-    ctx.lineTo(8, 14);
-    //Handle (right)
-    ctx.lineTo(6, 9);
-    //Base (right)
-    ctx.lineTo(10, 9);
-    ctx.lineTo(0, 0);
-    
-    ctx.fill();
-    ctx.stroke();
+  ctx.strokeStyle = "white";
+  ctx.fillStyle = "black";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  //Base (left)
+  ctx.moveTo(0, 0);
+  ctx.lineTo(0, 13);
+  //Handle (left)
+  ctx.lineTo(3, 10);
+  //Handle base (l/r)
+  ctx.lineTo(5, 15);
+  ctx.lineTo(8, 14);
+  //Handle (right)
+  ctx.lineTo(6, 9);
+  //Base (right)
+  ctx.lineTo(10, 9);
+  ctx.lineTo(0, 0);
+
+  ctx.fill();
+  ctx.stroke();
 }
 function render_cursor() {
-    let mouse = read(mouse_fd);
-    ctx.drawImage(cursor_canvas, mouse.x, mouse.y);
+  let mouse = read(mouse_fd);
+  ctx.drawImage(cursor_canvas, mouse.x, mouse.y);
 }
 function draw_background() {
-    ctx.drawImage(wallpaper_canvas, 0, 0);
+  ctx.drawImage(wallpaper_canvas, 0, 0);
 }
 function create_default_wallpaper() {
-    let _ctx = wallpaper_canvas.getContext("2d");
-    _ctx.fillStyle = "gray";
-    _ctx.fillRect(0, 0, wallpaper_canvas.width, wallpaper_canvas.height);
+  let _ctx = wallpaper_canvas.getContext("2d");
+  _ctx.fillStyle = "gray";
+  _ctx.fillRect(0, 0, wallpaper_canvas.width, wallpaper_canvas.height);
 }
 
 /* Client Operations */
 
 function get_controller(envp) {
-    let runtime_dir = get_variable_value("RUNTIME_DIR", envp);
+  let runtime_dir = get_variable_value("RUNTIME_DIR", envp);
 
-    let fd = fopen(runtime_dir, "r");
-    let controller = read(fd);
-    fclose(fd);
-    return controller;
+  let fd = fopen(runtime_dir, "r");
+  let controller = read(fd);
+  fclose(fd);
+  return controller;
 }
 function init_client(envp) {
-    ctl = get_controller(envp);
-    display = {
-        width: ctl.width,
-        height: ctl.height
-    }
+  ctl = get_controller(envp);
+  display = {
+    width: ctl.width,
+    height: ctl.height,
+  };
 }
 function create_window(title, width, height) {
-    let win = new Win(title, width, height);
-    ctl.push_window(win);
-    return win;
+  let win = new Win(title, width, height);
+  ctl.push_window(win);
+  return win;
 }
 function destroy_window(window) {
-    ctl.close_window(window);
+  ctl.close_window(window);
 }

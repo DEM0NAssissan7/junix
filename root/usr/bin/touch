@@ -1,0 +1,9 @@
+this.main = function (args) {
+  let fd;
+  if (args.length === 0) fprintf(stderr, `You must specify a file`);
+  for (const file of args) {
+    fd = fopen(file, "w");
+    fclose(fd);
+  }
+  return 0;
+};
