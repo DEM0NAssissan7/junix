@@ -877,6 +877,12 @@ let errno;
       for (let i = 0; i < tasks.length; i++) {
         const task = tasks[i];
         if (task.dead) {
+          for (let j = 0; j < task.parent.length; j++) {
+            if (task.parent[j].pid === task.pid) {
+              task.parent.splice(j, 1);
+              j--;
+            }
+          }
           for (let j = 0; j < task.siblings.length; j++) {
             if (task.siblings[j].pid === task.pid) {
               task.siblings.splice(j, 1);
